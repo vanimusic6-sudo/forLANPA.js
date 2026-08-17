@@ -1,0 +1,310 @@
+(function () {
+    'use strict';
+    if (window.should_watch_plugin_installed) return;
+    window.should_watch_plugin_installed = true;
+    window.should_watch_plugin_enhanced = true;
+
+    var PLUGIN_ID = 'should_watch_plugin_enhanced';
+    var SETTINGS_FLAG = 'sw_settings_ready_v45';
+    var ICON = '<svg viewBox="0 0 24 24" width="30" height="30" xmlns="http://www.w3.org/2000/svg"><path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z" fill="currentColor"/></svg>';
+    var DISPLAY = '"Trebuchet MS", "Segoe UI", system-ui, -apple-system, sans-serif';
+    var GENRE_ID_ANIM = 16, GENRE_ID_FAMILY = 10751, GENRE_ID_KIDS = 10762;
+
+    var _metaCache = {};
+    var _domCache = null;
+
+    window._sw_rolling = false;
+    window._sw_currentModalHtml = null;
+    window._sw_prevController = null;
+    window._sw_closingFromController = false;
+    window._sw_loaderTimer = null;
+    window._sw_blocknav = false;
+    window._sw_activeInteractive = null;
+    window._sw_keyBound = false;
+
+    var INTERESTING_TAGS = [
+        { re: /based on novel|основан на романе|экранизац/i, text: '✨ Экранизация книги' },
+        { re: /based on true story|основан на реальных событиях|true story/i, text: '✨ На реальных событиях' },
+        { re: /based on comic|comic book|графическ роман/i, text: '✨ По мотивам комикса' },
+        { re: /oscar winner|academy award|лауреат оскар/i, text: '🏆 Лауреат премии Оскар' },
+        { re: /cannes|venice|berlin|film festival winner/i, text: '🎬 Призёр кинофестиваля' },
+        { re: /cult film|культов/i, text: '🎭 Культовый фильм' },
+        { re: /time travel|путешестви[яе] во времени/i, text: '⏳ Путешествия во времени' },
+        { re: /heist|ограблен/i, text: '💼 История ограбления' },
+        { re: /post[- ]?apocalyptic|постапокалипсис/i, text: '☣️ Постапокалипсис' },
+        { re: /dystopia|антиутопи/i, text: '🏙 Антиутопия' },
+        { re: /coming of age|взрослен/i, text: '🌱 История взросления' },
+        { re: /cyberpunk|киберпанк/i, text: '🤖 Киберпанк' },
+        { re: /space|космос|moon|lunar|mars|марс/i, text: '🚀 Космос' },
+        { re: /biographical|biopic|биограф/i, text: '📖 Биографическая история' }
+    ];
+    var FEATURES = [
+        { re: /plot twist|twist ending|неожиданн поворот|сюжетн поворот/i, text: '🌀 Неожиданные повороты' },
+        { re: /superhero|супергеро/i, text: '🦸 Супергероика' },
+        { re: /strong female lead|сильн героин/i, text: '💪 Сильная героиня' },
+        { re: /musical|мюзикл/i, text: '🎶 Мюзикл' },
+        { re: /magic|маги|волшеб/i, text: '🪄 Магия' },
+        { re: /dragon|дракон/i, text: '🐉 Драконы' },
+        { re: /detective|детектив/i, text: '🕵️ Детектив' },
+        { re: /animal|животн/i, text: '🐾 Милые животные' },
+        { re: /кошк|кошач/i, text: '🐱 Котики' },
+        { re: /собак|пёс|пес[i]|dog/i, text: '🐶 Собаки' },
+        { re: /friendship|дружб/i, text: '🤝 О дружбе' },
+        { re: /romance|романтик/i, text: '❤️ Романтика' }
+    ];
+    var DOM_METRICS = [['pace','Темп'],['fear','Страх'],['action','Экшен'],['violence','Насилие'],['sadness','Грусть'],['language','Лексика']].map(function(p){
+        return { key: p[0], re: new RegExp(p[1] + '[\\s\\S]{0,60}?([\\d.,]+)\\s*/\\s*10') };
+    });
+
+    function getSetting(k, d) { try { var v = Lampa.Storage.get(PLUGIN_ID + '_' + k); if (v !== undefined && v !== null && v !== '') return v; } catch(e) {} return d; }
+    function getSettings() {
+        return {
+            bad_genres: String(getSetting('bad_genres', '') || ''),
+            bad_actors: String(getSetting('bad_actors', '') || ''),
+            bad_directors: String(getSetting('bad_directors', '') || ''),
+            min_rating: parseFloat(getSetting('min_rating', '6')) || 6,
+            font_scale: parseInt(getSetting('font_scale', '20')) || 20
+        };
+    }
+    function parseBL(s) { return s ? s.split(',').map(function(x){ return x.trim().toLowerCase(); }).filter(Boolean) : []; }
+    function initSettings() {
+        try {
+            if (!window.Lampa || !Lampa.SettingsApi || window[SETTINGS_FLAG]) return;
+            window[SETTINGS_FLAG] = true;
+            Lampa.SettingsApi.addComponent({ component: PLUGIN_ID, name: 'Стоит ли смотреть', icon: ICON });
+            [
+                { name: 'bad_genres', type: 'input', title: 'Нелюбимые жанры', description: 'Через запятую', default: '' },
+                { name: 'bad_actors', type: 'input', title: 'Нелюбимые актёры', description: 'Через запятую', default: '' },
+                { name: 'bad_directors', type: 'input', title: 'Нелюбимые авторы', description: 'Через запятую', default: '' },
+                { name: 'min_rating', type: 'select', title: 'Минимальный рейтинг', values: {'0':'Любой','5':'5.0','6':'6.0','7':'7.0','8':'8.0'}, default: '6' },
+                { name: 'font_scale', type: 'select', title: 'Размер шрифта', values: {'12':'12','14':'14','16':'16','18':'18','20':'20','24':'24','28':'28','32':'32'}, default: '20' },
+                { name: 'reset_cache', type: 'select', title: 'Кэш данных', values: {'0':'Хранить','1':'Сбросить при открытии'}, default: '0' }
+            ].forEach(function(p) {
+                Lampa.SettingsApi.addParam({
+                    component: PLUGIN_ID,
+                    param: { name: PLUGIN_ID + '_' + p.name, type: p.type, values: p.values || '', default: p.default },
+                    field: { name: p.title, description: p.description }
+                });
+            });
+        } catch(e) { console.error('[SW] initSettings:', e); }
+    }
+
+    function injectCSS() {
+        if (document.getElementById('sw-plugin-styles-enhanced')) return;
+        var s = document.createElement('style'); s.id = 'sw-plugin-styles-enhanced';
+        s.innerHTML =
+            '.sw-custom-button-enhanced{cursor:pointer;transition:all .25s ease}' +
+            '.sw-custom-button-enhanced.focus{background:rgba(255,255,255,.18);color:#fff;transform:scale(1.02);box-shadow:0 0 15px rgba(255,255,255,.1)}' +
+            '.sw-modal-content{padding:28px 32px 48px;color:#f1f5f9;font-family:' + DISPLAY + ';font-size:20px;box-sizing:border-box;max-height:88vh;overflow-y:auto;overflow-x:hidden;-webkit-overflow-scrolling:touch;touch-action:pan-y}' +
+            '.sw-modal-content::-webkit-scrollbar{width:6px}.sw-modal-content::-webkit-scrollbar-thumb{background:rgba(255,255,255,.2);border-radius:10px}' +
+            '.sw-body{animation:swFadeIn .4s cubic-bezier(.16,1,.3,1)}' +
+            '@keyframes swFadeIn{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}' +
+            '.sw-loader{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;padding:60px 20px;min-height:45vh;color:#94a3b8}' +
+            '.sw-loader-emoji{font-size:3.2em;line-height:1;animation:swFloat 2s cubic-bezier(.45,0,.55,1) infinite}' +
+            '@keyframes swFloat{0%,100%{transform:translateY(0) scale(1)}50%{transform:translateY(-10px) scale(1.05)}}' +
+            '.sw-loader-text{font-size:1em;font-weight:600;min-height:1.5em;text-align:center;color:#cbd5e1;letter-spacing:.02em}' +
+            '.sw-loader-progress{width:220px;height:4px;border-radius:4px;background:rgba(255,255,255,.08);overflow:hidden;position:relative;margin-top:8px}' +
+            '.sw-loader-progress::after{content:"";position:absolute;left:-100%;top:0;height:100%;width:100%;background:linear-gradient(90deg,transparent,#10b981,transparent);animation:swSlide 1.2s cubic-bezier(.4,0,.2,1) infinite}' +
+            '@keyframes swSlide{0%{left:-100%}100%{left:100%}}' +
+            '.sw-dossier{position:relative;background:linear-gradient(145deg,#1e293b,#0f172a);border:1px solid rgba(255,255,255,.08);border-radius:18px;padding:30px;margin-bottom:24px;box-shadow:0 10px 30px rgba(0,0,0,.4);backdrop-filter:blur(12px);animation:swRise .5s cubic-bezier(.16,1,.3,1) both}' +
+            '@keyframes swRise{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:translateY(0)}}' +
+            '.sw-badges{position:absolute;top:22px;right:22px;display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;max-width:55%}' +
+            '.sw-mode-badge{display:inline-flex;align-items:center;gap:6px;font-size:.65em;padding:6px 14px;border-radius:20px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;background:rgba(255,255,255,.06);color:#94a3b8;border:1px solid rgba(255,255,255,.05)}' +
+            '.sw-mode-dot{width:6px;height:6px;border-radius:50%;display:inline-block}' +
+            '.sw-mode-dot.active{background:#10b981;box-shadow:0 0 8px #10b981}' +
+            '.sw-mode-dot.inactive{background:#64748b}' +
+            '.sw-verdict-word{font-size:2.8em;font-weight:900;letter-spacing:.02em;line-height:1;margin:0 0 18px;text-transform:uppercase;opacity:0;transform:translateY(10px) scale(.96);transition:opacity .4s ease,transform .45s cubic-bezier(.16,1,.3,1)}' +
+            '.sw-verdict-word.appear{opacity:1;transform:translateY(0) scale(1)}' +
+            '.sw-verdict-word.yes{color:#10b981;text-shadow:0 0 25px rgba(16,185,129,.35)}' +
+            '.sw-verdict-word.no{color:#ef4444;text-shadow:0 0 25px rgba(239,68,68,.35)}' +
+            '.sw-verdict-word.maybe{color:#f59e0b;text-shadow:0 0 25px rgba(245,158,11,.35)}' +
+            '.sw-meter{height:6px;border-radius:3px;background:rgba(255,255,255,.08);overflow:hidden}' +
+            '.sw-meter-fill{height:100%;width:0;border-radius:3px;transition:width 1s cubic-bezier(.16,1,.3,1)}' +
+            '.sw-meter-fill.yes{background:linear-gradient(90deg,#059669,#10b981);box-shadow:0 0 10px rgba(16,185,129,.5)}' +
+            '.sw-meter-fill.no{background:linear-gradient(90deg,#dc2626,#ef4444);box-shadow:0 0 10px rgba(239,68,68,.5)}' +
+            '.sw-meter-fill.maybe{background:linear-gradient(90deg,#d97706,#f59e0b);box-shadow:0 0 10px rgba(245,158,11,.5)}' +
+            '.sw-dicebtn{position:relative;display:block;width:100%;height:90px;background:linear-gradient(135deg,#f8fafc,#e2e8f0);border:none;border-radius:16px;margin:0 0 24px;overflow:hidden;cursor:pointer;outline:none;-webkit-tap-highlight-color:transparent;box-shadow:0 8px 20px rgba(0,0,0,.25);transition:all .4s cubic-bezier(.16,1,.3,1)}' +
+            '.sw-dicebtn.focus{box-shadow:0 0 0 4px #10b981, 0 10px 25px rgba(0,0,0,.3);transform:translateY(-2px)}' +
+            '.sw-dicebtn.morph{width:110px;margin-left:auto;margin-right:auto;border-radius:30px}' +
+            '.sw-label-wrap{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;padding:0 96px;overflow:hidden}' +
+            '.sw-label{font-family:' + DISPLAY + ';font-size:1.8em;font-weight:800;color:#334155;letter-spacing:.01em;text-align:center;white-space:nowrap;opacity:1;transition:opacity .25s ease}' +
+            '.sw-label.hidden{opacity:0}' +
+            '.sw-label.res-yes{color:#059669}.sw-label.res-no{color:#dc2626}' +
+            '.sw-dice{position:absolute;left:18px;top:50%;width:60px;height:60px;margin-top:-30px;will-change:transform;transition:left .4s cubic-bezier(.16,1,.3,1),margin-left .4s cubic-bezier(.16,1,.3,1)}' +
+            '.sw-dice svg{width:100%;height:100%;display:block;transform:rotate(-6deg)}' +
+            '.sw-dicebtn.morph .sw-dice{left:50%;margin-left:-30px}' +
+            '.sw-dice.sw-spin{animation:swSpin .85s cubic-bezier(.34,1.56,.64,1) forwards}' +
+            '@keyframes swSpin{0%{transform:rotate(0) scale(1)}50%{transform:rotate(360deg) scale(1.2)}100%{transform:rotate(720deg) scale(1)}}' +
+            '.sw-columns{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:24px}' +
+            '.sw-col{position:relative;background:#0f172a;border:1px solid rgba(255,255,255,.05);border-radius:16px;padding:24px 26px;box-shadow:0 4px 15px rgba(0,0,0,.2)}' +
+            '.sw-col::before{content:"";position:absolute;top:0;left:24px;right:24px;height:3px;border-radius:3px}' +
+            '.sw-col.pros::before{background:linear-gradient(90deg,transparent,#10b981,transparent)}' +
+            '.sw-col.cons::before{background:linear-gradient(90deg,transparent,#ef4444,transparent)}' +
+            '.sw-title{font-size:.85em;font-weight:800;margin-bottom:16px;text-transform:uppercase;letter-spacing:.08em}' +
+            '.sw-title.pros{color:#10b981}.sw-title.cons{color:#ef4444}' +
+            '.sw-list{margin:0;padding-left:20px;font-size:1.05em;line-height:1.65;color:#cbd5e1}' +
+            '.sw-list li{margin-bottom:10px;opacity:0;transform:translateX(-10px);transition:opacity .35s ease,transform .35s cubic-bezier(.16,1,.3,1)}' +
+            '.sw-list li.appear{opacity:1;transform:translateX(0)}' +
+            '.sw-focusable{outline:none;cursor:pointer}' +
+            '@media(max-width:640px){.sw-modal-content{padding:20px 18px 36px}.sw-columns{grid-template-columns:1fr}.sw-verdict-word{font-size:2.2em}.sw-label{font-size:1.3em}.sw-label-wrap{padding:0 70px}.sw-dice{width:50px;height:50px;margin-top:-25px;left:14px}.sw-dicebtn.morph .sw-dice{margin-left:-25px}}';
+        document.head.appendChild(s);
+    }
+
+    var escMap = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+    function esc(s) { if (typeof s !== 'string') return ''; return s.replace(/[&<>"']/g, function(m){ return escMap[m]; }); }
+    function hasGenre(g, re) { return g.some(function(x){ return re.test((x || '').toLowerCase()); }); }
+    function inText(s, re) { return re.test((s || '').toLowerCase()); }
+    function inAnyText(texts, re) { return texts.some(function(s){ return inText(s, re); }); }
+    function mediaType(m) { return (m && m.name && !m.title) ? 'tv' : 'movie'; }
+    function uniq(arr) { return arr.filter(function(v,i,s){ return s.indexOf(v) === i; }); }
+    function fmtN(n) { return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ' '); }
+
+    function findScrollParent(node) {
+        try {
+            var el = node;
+            while (el && el.nodeType === 1 && el !== document.body && el !== document.documentElement) {
+                var oy = window.getComputedStyle(el).overflowY;
+                if ((oy === 'auto' || oy === 'scroll' || oy === 'overlay') && el.scrollHeight > el.clientHeight + 4) return el;
+                el = el.parentNode;
+            }
+        } catch(e) {}
+        return document.scrollingElement || document.documentElement;
+    }
+    function getScrollContainer() {
+        var h = window._sw_currentModalHtml;
+        if (!h || !h.length) return null;
+        var inner = h.find('.sw-modal-content')[0] || h[0];
+        return findScrollParent(inner);
+    }
+    function scrollContainerTo(el, center) {
+        if (!window._sw_blocknav) return;
+        try {
+            if (!el || !el.length) return;
+            var cn = getScrollContainer(); if (!cn) return;
+            var cRect = cn.getBoundingClientRect(), eRect = el[0].getBoundingClientRect();
+            var delta = eRect.top - cRect.top, target;
+            if (center) target = cn.scrollTop + delta - (cn.clientHeight / 2) + (eRect.height / 2);
+            else if (eRect.top < cRect.top + 8) target = cn.scrollTop + delta - 20;
+            else if (eRect.bottom > cRect.bottom - 8) target = cn.scrollTop + (eRect.bottom - cRect.bottom) + 20;
+            else return;
+            try { $(cn).stop(true, false).animate({ scrollTop: target }, 200, 'swing'); }
+            catch(e) { cn.scrollTop = target; }
+        } catch(e) {}
+    }
+    function interactiveSet() { var h = window._sw_currentModalHtml; if (!h) return $(); return h.find('.sw-focusable:visible'); }
+    function focusRing(el, doScroll) {
+        var h = window._sw_currentModalHtml; if (!h) return;
+        h.find('.sw-focusable').removeClass('focus');
+        el.addClass('focus');
+        window._sw_activeInteractive = el[0];
+        if (doScroll !== false) scrollContainerTo(el, false);
+    }
+    function highlightVisible() {
+        if (!window._sw_blocknav) return;
+        var set = interactiveSet(); if (!set.length) return;
+        var cn = getScrollContainer(), mid;
+        if (cn) { var r = cn.getBoundingClientRect(); mid = r.top + r.height / 2; } else mid = window.innerHeight / 2;
+        var best = null, bd = 1e9;
+        set.each(function(){ var rr = this.getBoundingClientRect(); var d = Math.abs((rr.top + rr.height/2) - mid); if (d < bd) { bd = d; best = this; } });
+        if (best) focusRing($(best), false);
+    }
+    function moveHorizontal(dir) {
+        if (!window._sw_blocknav) return;
+        var set = interactiveSet(); if (!set.length) return;
+        var idx = -1;
+        if (window._sw_activeInteractive) idx = set.index(window._sw_activeInteractive);
+        if (idx < 0) idx = dir > 0 ? -1 : 0;
+        var n = idx + dir; if (n < 0) n = set.length - 1; if (n >= set.length) n = 0;
+        focusRing(set.eq(n));
+    }
+    function scrollStep(dir) {
+        if (!window._sw_blocknav) return;
+        var cn = getScrollContainer(); if (!cn) return;
+        var step = Math.max(100, Math.round(cn.clientHeight * 0.6));
+        var maxScroll = Math.max(0, cn.scrollHeight - cn.clientHeight);
+        var target = Math.min(Math.max(0, cn.scrollTop + dir * step), maxScroll);
+        try { $(cn).stop(true, false).animate({ scrollTop: target }, 200, 'swing', highlightVisible); }
+        catch(e) { cn.scrollTop = target; highlightVisible(); }
+    }
+
+    function genreByIdOrName(genresRaw, ids, nameRe) {
+        if (!genresRaw || !genresRaw.length) return false;
+        for (var i = 0; i < genresRaw.length; i++) {
+            var g = genresRaw[i];
+            if (g && typeof g === 'object') {
+                if (g.id && ids.indexOf(g.id) >= 0) return true;
+                if (nameRe.test((g.name || '').toLowerCase())) return true;
+            } else if (typeof g === 'string') { if (nameRe.test(g.toLowerCase())) return true; }
+        }
+        return false;
+    }
+    function loadCredits(movie) {
+        try {
+            if (movie.credits && ((movie.credits.cast && movie.credits.cast.length) || (movie.credits.crew && movie.credits.crew.length))) return Promise.resolve(movie.credits);
+            var id = movie.id || movie.tmdb_id; if (!id) return Promise.resolve(null);
+            if (Lampa.TMDB && typeof Lampa.TMDB.credits === 'function') {
+                return new Promise(function(res){ Lampa.TMDB.credits(id, function(d){ res(d && !d.status_code ? d : null); }, function(){ res(null); }); });
+            }
+        } catch(e) {}
+        return Promise.resolve(null);
+    }
+    function tmdbKey() { try { if (Lampa.TMDB && Lampa.TMDB.key) return Lampa.TMDB.key; } catch(e) {} return '4ef0d7355d9ffb5151e987764708ce96'; }
+    function curLangCode() { try { var l = Lampa.Storage.get('language', 'ru') || 'ru'; return l + '-' + l.toUpperCase(); } catch(e) { return 'ru-RU'; } }
+    function tmdbGet(path, lang) {
+        return new Promise(function(res){
+            try {
+                var langCode = lang || curLangCode();
+                var url = 'https://api.themoviedb.org/3' + path + (path.indexOf('?') > -1 ? '&' : '?') + 'language=' + langCode + '&api_key=' + tmdbKey();
+                if (Lampa.Request && typeof Lampa.Request.get === 'function') {
+                    Lampa.Request.get(url, function(d){ res(d && d.status_code ? null : d); }, function(){ res(null); }, { dataType: 'json' });
+                } else if (typeof fetch !== 'undefined') {
+                    fetch(url).then(function(r){ return r.json(); }).then(function(d){ res(d && d.status_code ? null : d); }).catch(function(){ res(null); });
+                } else res(null);
+            } catch(e) { res(null); }
+        });
+    }
+    function mapUSRating(s) {
+        return { 'G':0,'PG':7,'PG-13':13,'R':17,'NC-17':17,'TV-MA':17,'TV-14':14,'TV-PG':7,'TV-G':0,'TV-Y7':7,'TV-Y':0,'MA':17,'18':18,'16':16,'12':12,'12A':12,'15':15 }[(s || '').toUpperCase().trim()] || null;
+    }
+    function loadMeta(movie) {
+        var id = movie.id || movie.tmdb_id;
+        if (!id) return Promise.resolve({ kw: [], age: null, reviews: [], hasTrailer: false, enOv: '' });
+        if (_metaCache[id]) return Promise.resolve(_metaCache[id]);
+        if (Object.keys(_metaCache).length > 100) _metaCache = {};
+        var type = mediaType(movie);
+        return Promise.all([
+            tmdbGet('/' + type + '/' + id + '/keywords'),
+            tmdbGet('/' + type + '/' + id + '/content_ratings'),
+            tmdbGet('/' + type + '/' + id + '/reviews'),
+            tmdbGet('/' + type + '/' + id + '/videos'),
+            tmdbGet('/' + type + '/' + id, 'en-US')
+        ]).then(function(arr){
+            var kw = [];
+            if (arr[0]) (arr[0].keywords || arr[0].results || []).forEach(function(k){ if (k && k.name) kw.push(k.name.toLowerCase()); });
+            var age = null;
+            if (arr[1] && arr[1].results) {
+                var ru = arr[1].results.find(function(x){ return x.iso_3166_1 === 'RU'; });
+                var us = arr[1].results.find(function(x){ return x.iso_3166_1 === 'US'; });
+                if (ru && ru.rating) { var n = parseInt(ru.rating); if (!isNaN(n)) age = n; }
+                if (age === null && us && us.rating) age = mapUSRating(us.rating);
+                if (age === null && arr[1].results.length) { var f = arr[1].results[0]; if (f.rating) { var n2 = parseInt(f.rating); age = !isNaN(n2) ? n2 : mapUSRating(f.rating); } }
+            }
+            var reviews = [];
+            if (arr[2] && arr[2].results) reviews = arr[2].results.slice(0, 6).map(function(r){ return { author: r.author || 'Аноним', text: (r.content || '').replace(/<[^>]+>/g, '').trim() }; }).filter(function(r){ return r.text.length > 20; });
+            var hasTrailer = false;
+            if (arr[3] && arr[3].results) hasTrailer = arr[3].results.some(function(v){ return v.type === 'Trailer' && v.site === 'YouTube'; });
+            var enOv = (arr[4] && arr[4].overview) ? arr[4].overview : '';
+            var r = { kw: kw, age: age, reviews: reviews, hasTrailer: hasTrailer, enOv: enOv };
+            if (!r.kw.length) {
+                return tmdbGet('/' + type + '/' + id + '/keywords').then(function(d){
+                    if (d) (d.keywords || d.results || []).forEach(function(k){ if (k && k.name) r.kw.push(k.name.toLowerCase()); });
+                    _metaCache[id] = r; return r;
+                });
+            }
+            _metaCache[id] = r; return r;
+        });
+    }
+
+    injectCSS();
+    initSettings();
+})();
