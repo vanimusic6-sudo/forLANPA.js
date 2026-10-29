@@ -147,13 +147,13 @@
     }
 
     function injectCSS() {
-        if (document.getElementById('sw-plugin-styles-v55')) return;
-        ['sw-plugin-styles-v51', 'sw-plugin-styles-v52', 'sw-plugin-styles-v53', 'sw-plugin-styles-v54'].forEach(function(id){
+        if (document.getElementById('sw-plugin-styles-v56')) return;
+        ['sw-plugin-styles-v51', 'sw-plugin-styles-v52', 'sw-plugin-styles-v53', 'sw-plugin-styles-v54', 'sw-plugin-styles-v55'].forEach(function(id){
             var old = document.getElementById(id);
             if (old && old.parentNode) old.parentNode.removeChild(old);
         });
         var s = document.createElement('style');
-        s.id = 'sw-plugin-styles-v55';
+        s.id = 'sw-plugin-styles-v56';
         s.innerHTML =
             // === Trigger button on full-card ===
             '.sw-custom-button-enhanced{cursor:pointer;position:relative;transition:background .25s ease,color .25s,transform .2s ease,box-shadow .25s;display:inline-flex;align-items:center;justify-content:center;border-radius:12px;user-select:none;overflow:hidden}' +
@@ -238,6 +238,30 @@
             '.sw-aud-arrow{width:1.1em;height:1.1em;flex:0 0 auto;margin-top:.12em}' +
             '.sw-focusable{outline:none;cursor:pointer}' +
             '@media(max-width:680px){.sw-columns{grid-template-columns:1fr}.sw-metrics-grid{grid-template-columns:1fr}.sw-verdict-word{font-size:1.8em}.sw-dice-label{font-size:1.2em}.sw-dice{width:38px;height:38px;margin-top:-19px;left:12px}.sw-dossier{padding:18px 14px 14px}}';
+        s.innerHTML +=
+            '.sw-wrap{--sw-green:#74d79a;--sw-red:#f1787b;--sw-orange:#f3bd68;--sw-ink:#f2f4f6;--sw-mut:#aeb5be;padding:12px 10px 32px;max-width:100%;line-height:1.45}' +
+            '.sw-dossier{background:linear-gradient(135deg,#242b31,#1d2227);border:1px solid rgba(255,255,255,.11);border-radius:18px;padding:22px;box-shadow:0 8px 20px rgba(0,0,0,.16)}' +
+            '.sw-verdict-word{font-size:clamp(1.5em,4vw,2.2em);letter-spacing:.015em;overflow-wrap:anywhere;margin-bottom:12px}' +
+            '.sw-why{font-size:.71em;color:#bec8d0;line-height:1.45;margin-top:13px}' +
+            '.sw-scale{display:flex;justify-content:space-between;color:#88939d;font-size:.61em;margin-top:6px}' +
+            '.sw-col{border-radius:14px;background:rgba(255,255,255,.025);box-shadow:none;border:1px solid rgba(255,255,255,.07);padding:16px}' +
+            '.sw-col.pros{border-left:3px solid var(--sw-green)}.sw-col.cons{border-left:3px solid var(--sw-red)}' +
+            '.sw-col-title{font-size:.9em;font-weight:700;margin-bottom:12px;color:#f3f5f6}' +
+            '.sw-list{font-size:.86em;line-height:1.45}.sw-list li{margin-bottom:10px}' +
+            '.sw-tabs{gap:10px}.sw-tab-btn{font-family:' + FONT + ';font-size:.88em;border-radius:12px;min-height:50px}' +
+            '.sw-tab-btn.active{border-color:rgba(255,255,255,.25)}.sw-tab-btn.focus,.sw-dicebtn.focus{box-shadow:0 0 0 2px #f2f3f4,0 4px 14px rgba(0,0,0,.24)}' +
+            '.sw-dicebtn{height:64px;margin-bottom:6px;border-radius:13px;box-shadow:none}.sw-dice-label{font-family:' + FONT + ';font-size:1.1em}' +
+            '.sw-dice-hint{font-size:.68em;text-align:center;color:#99a5ae;margin:0 0 18px}' +
+            '.sw-note{font-size:.72em;line-height:1.4;color:#aeb7bf;margin:0 0 12px}' +
+            '.sw-error{padding:45px 20px;text-align:center;color:#ef9e9e}' +
+            '.sw-metric-card,.sw-audience-box{box-shadow:none;background:rgba(255,255,255,.025)}' +
+            '.sw-metric-score.hi,.sw-metric-score.mid,.sw-metric-score.ok{color:#f0f2f4}' +
+            '.sw-body{animation:swPaneIn .28s cubic-bezier(.2,.7,.2,1)}' +
+            '.sw-list li,.sw-metric-card{will-change:auto;transition-duration:.27s}' +
+            '.sw-verdict-word,.sw-meter-fill,.sw-dice-core{will-change:auto}' +
+            '.sw-dicebtn:not(.sw-rolling) .sw-dice{animation:none}' +
+            '@media(max-width:600px){.sw-wrap{padding:10px 4px 30px}.sw-columns,.sw-metrics-grid{grid-template-columns:1fr}.sw-dossier{padding:17px}.sw-tab-btn{font-size:.78em}.sw-dice-label{font-size:.95em}}' +
+            '@media(prefers-reduced-motion:reduce){.sw-wrap *, .sw-wrap *::before,.sw-wrap *::after{animation:none!important;transition-duration:.01ms!important;scroll-behavior:auto!important}}';
         document.head.appendChild(s);
     }
 
@@ -407,18 +431,25 @@
 
     function loadCredits(movie) {
         try {
-            if (movie.credits && ((movie.credits.cast && movie.credits.cast.length) || (movie.credits.crew && movie.credits.crew.length))) {
+            if (movie.credits && ((movie.credits.cast && movie.credits.cast.length) ||
+                (movie.credits.crew && movie.credits.crew.length))) {
                 return Promise.resolve(movie.credits);
             }
             var id = movie.id || movie.tmdb_id;
-            if (!id) return Promise.resolve(null);
-            if (window.Lampa && Lampa.TMDB && typeof Lampa.TMDB.credits === 'function') {
-                return new Promise(function(res){
-                    Lampa.TMDB.credits(id, function(d){ res(d && !d.status_code ? d : null); }, function(){ res(null); });
-                });
+            if (!id || !window.Lampa || !Lampa.TMDB || typeof Lampa.TMDB.credits !== 'function') {
+                return Promise.resolve(null);
             }
-        } catch(e) {}
-        return Promise.resolve(null);
+            return new Promise(function(resolve){
+                var settled = false, timer = setTimeout(function(){ done(null); }, 7000);
+                function done(result) {
+                    if (settled) return;
+                    settled = true; clearTimeout(timer);
+                    resolve(result && !result.status_code ? result : null);
+                }
+                try { Lampa.TMDB.credits(id, done, function(){ done(null); }); }
+                catch(e) { done(null); }
+            });
+        } catch(e) { return Promise.resolve(null); }
     }
 
     function tmdbKey() {
@@ -836,9 +867,9 @@
             var dramaHeuristic = (hasGenre(genres, /драма|drama|биография|biography|исторический|historical/i) ? 8.2 : (rating >= 8 ? 7.0 : 5.0));
             var mDrama = mm.sadness > 0 ? mm.sadness : dramaHeuristic;
 
-            var mFear = mm.fear > 0 ? mm.fear : (hasGenre(genres, /ужасы|хоррор/i) ? 8.8 : (hasGenre(genres, /триллер/i) ? 7.2 : 2.5));
+            var mFear = mm.fear > 0 ? mm.fear : (hasGenre(genres, /horror|ужасы|хоррор/i) ? 8.5 : (hasGenre(genres, /thriller|триллер/i) ? 6.7 : 2.5));
 
-            var immersionHeuristic = (hasGenre(genres, /фантастика|sci-fi|фэнтези|fantasy|приключения|adventure/i) ? 8.5 : (rating >= 7.5 ? 7.5 : 5.5));
+            var immersionHeuristic = (hasGenre(genres, /фантастика|science fiction|sci-fi|фэнтези|fantasy|приключения|adventure/i) ? 7.5 : 5.5);
             var mImmersion = immersionHeuristic;
 
             var metricsEstimated = !dom.ok;
