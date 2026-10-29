@@ -33,6 +33,17 @@
         overview: 'Кобб — талантливый вор, лучший из лучших в опасном искусстве извлечения: он крадёт ценные секреты из глубин подсознания во время сна.'
     };
 
+    var _sw_session = 0, _sw_openingAt = 0, _sw_uiTimers = [];
+    function uiLater(fn, ms, session) {
+        var t = setTimeout(function(){
+            if (session !== _sw_session || window._sw_closed) return;
+            fn();
+        }, ms);
+        _sw_uiTimers.push(t);
+        return t;
+    }
+    function clearUiTimers(){ _sw_uiTimers.forEach(clearTimeout); _sw_uiTimers = []; }
+
     var _metaCache = {};
     var _domCache = null;
 
@@ -182,7 +193,7 @@
             '.sw-dice{position:absolute;left:16px;top:50%;width:44px;height:44px;margin-top:-22px}' +
             '.sw-dice-core{display:block;width:100%;height:100%;filter:drop-shadow(0 4px 6px rgba(0,0,0,.4));transform-origin:50% 100%;will-change:transform}' +
             '.sw-dice-core svg{width:100%;height:100%;display:block}' +
-            '.sw-dice-core.sw-knock{animation:swKnock .56s cubic-bezier(.33,.02,.17,1) both}' +
+            '.sw-dice-core.sw-knock{animation:swKnock .42s cubic-bezier(.33,.02,.17,1) both}' +
             '@keyframes swKnock{0%{transform:translateY(0) scale(1,1)}28%{transform:translateY(-18px) scale(1.04,1.04)}50%{transform:translateY(0) scale(1,1)}64%{transform:translateY(2px) scale(1.14,.8)}80%{transform:translateY(-4px) scale(.98,1.04)}100%{transform:translateY(0) scale(1,1)}}' +
             '.sw-dice-label{position:relative;font-family:var(--sw-mono);font-size:1.4em;font-weight:700;color:#fff;text-align:center;text-transform:lowercase;letter-spacing:.02em;transition:opacity .25s ease,transform .25s ease;pointer-events:none;padding:0 16px}' +
             '.sw-dice-label.hide{opacity:0;transform:translateY(8px)}' +
@@ -291,7 +302,7 @@
     function interactiveSet() {
         var h = window._sw_currentModalHtml;
         if (!h || !h.length) return $();
-        return h.find('.sw-focusable').filter(':visible');
+        return h.find('.sw-focusable:not(.sw-disabled)').filter(':visible');
     }
 
     function swScrollToFocus(targetEl) {
@@ -343,7 +354,6 @@
         if (!window._sw_activeInteractive) return;
         var el = $(window._sw_activeInteractive);
         if (el.length) {
-            el.trigger('hover:enter');
             el.trigger('click');
         }
     }
@@ -924,8 +934,8 @@
         core.removeClass('sw-knock');
         void core[0].offsetWidth;
         core.addClass('sw-knock');
-        setTimeout(function(){ core.html(diceSVG(f)); }, 300);
-        setTimeout(function(){ core.removeClass('sw-knock'); if (cb) cb(); }, 580);
+        setTimeout(function(){ if (core[0] && document.body.contains(core[0])) core.html(diceSVG(f)); }, 190);
+        setTimeout(function(){ core.removeClass('sw-knock'); if (cb) cb(); }, 440);
     }
 
     function buildReadyInner(a) {
@@ -950,16 +960,19 @@
             '</div>';
 
         var prosConsHtml = '<div class="sw-columns">' +
-            '<div class="sw-col pros"><ul class="sw-list">' + a.pros.map(function(p){ return '<li>' + esc(p) + '</li>'; }).join('') + '</ul></div>' +
-            '<div class="sw-col cons"><ul class="sw-list">' + a.cons.map(function(c){ return '<li>' + esc(c) + '</li>'; }).join('') + '</ul></div>' +
+            '<div class="sw-col pros"><div class="sw-col-title">Что привлекает</div><ul class="sw-list">' + a.pros.slice(0, 8).map(function(p){ return '<li>' + esc(p) + '</li>'; }).join('') + '</ul></div>' +
+            '<div class="sw-col cons"><div class="sw-col-title">Что учитывать</div><ul class="sw-list">' + a.cons.slice(0, 8).map(function(c){ return '<li>' + esc(c) + '</li>'; }).join('') + '</ul></div>' +
             '</div>';
 
         return '<div class="sw-dossier">' +
             '<div class="sw-verdict-word ' + a.vClass + '" id="sw-vword">' + esc(a.vWord) + '</div>' +
-            '<div class="sw-meter"><div class="sw-meter-fill ' + a.vClass + '" data-w="' + a.norm + '"></div></div></div>' +
+            '<div class="sw-meter" aria-hidden="true"><div class="sw-meter-fill ' + a.vClass + '" data-w="' + a.norm + '"></div></div>' +
+            '<div class="sw-why">' + esc(a.why) + '</div>' +
+            '<div class="sw-scale"><span>не смотреть</span><span>смотреть</span></div></div>' +
             '<div class="sw-dicebtn selector sw-focusable" id="sw-dice-btn" tabindex="0">' +
             '<span class="sw-dice" id="sw-dice"><span class="sw-dice-core">' + diceSVG(1) + '</span></span>' +
             '<span class="sw-dice-label" id="sw-dice-label">довериться случаю</span></div>' +
+            '<div class="sw-dice-hint">Случайный выбор 50/50 — не оценка качества фильма.</div>' +
             '<div class="sw-tabs">' +
             '<div class="sw-tab-btn selector sw-focusable active" data-tab="proscons" tabindex="0">плюсы и минусы</div>' +
             '<div class="sw-tab-btn selector sw-focusable" data-tab="atmos" tabindex="0">атмосфера и темп</div>' +
@@ -968,6 +981,7 @@
             prosConsHtml +
             '</div>' +
             '<div class="sw-tab-pane" id="sw-pane-atmos">' +
+            (a.metricsEstimated ? '<div class="sw-note">Ориентировочная оценка по жанру и описанию, не результат опроса зрителей.</div>' : '') +
             '<div class="sw-metrics-grid">' + metricsHtml + '</div>' +
             audienceHtml +
             '</div>';
@@ -975,88 +989,68 @@
 
     function bindTabs(html) {
         var tabBtns = html.find('.sw-tab-btn');
+        var current = 'proscons', animatedMetrics = false;
         function activateTab(target, el) {
-            tabBtns.removeClass('active');
-            tabBtns.filter('[data-tab="' + target + '"]').addClass('active');
+            if (target !== 'atmos' && target !== 'proscons') return;
+            if (el) focusRing($(el), false);
+            if (target === current) return;
+            current = target;
+            tabBtns.removeClass('active').attr('aria-selected','false');
+            tabBtns.filter('[data-tab="' + target + '"]').addClass('active').attr('aria-selected','true');
             html.find('.sw-tab-pane').removeClass('active');
             html.find('#sw-pane-' + target).addClass('active');
-            if (target === 'atmos') {
+            if (target === 'atmos' && !animatedMetrics) {
+                animatedMetrics = true;
                 html.find('#sw-pane-atmos .sw-metric-card').each(function(i){
-                    var card = $(this);
-                    var fill = card.find('.sw-metric-bar-fill');
-                    card.removeClass('appear');
-                    fill.css('width', 0);
-                    setTimeout(function(){
+                    var card = $(this), fill = card.find('.sw-metric-bar-fill');
+                    uiLater(function(){
                         card.addClass('appear');
                         fill.css('width', (fill.attr('data-w') || 0) + '%');
-                    }, i * 70);
+                    }, 45 + i * 45, _sw_session);
                 });
             }
-            if (el) focusRing($(el), true);
         }
-        tabBtns.on('hover:enter', function(){
+        tabBtns.on('hover:enter click', function(){
             activateTab($(this).attr('data-tab'), this);
         });
-        tabBtns.on('hover:hover', function(){
-            focusRing($(this), false);
-        });
-        tabBtns.on('click', function(){
-            activateTab($(this).attr('data-tab'), this);
-        });
+        tabBtns.on('hover:hover', function(){ focusRing($(this), false); });
+        tabBtns.attr('role','tab').attr('aria-selected','false');
+        tabBtns.filter('.active').attr('aria-selected','true');
     }
 
     function bindDice(html) {
-        var btn = html.find('#sw-dice-btn');
-        var dice = html.find('#sw-dice');
+        var btn = html.find('#sw-dice-btn'), dice = html.find('#sw-dice');
         var label = html.find('#sw-dice-label');
         if (!btn.length || !dice.length || !label.length) return;
-
+        var session = _sw_session;
         function rollDice() {
-            if (window._sw_rolling) return;
+            if (window._sw_rolling || window._sw_closed || session !== _sw_session) return;
             window._sw_rolling = true;
-
-            html.find('.sw-tab-btn').addClass('sw-disabled');
             btn.addClass('sw-rolling');
-
-            var choice = SW_DICE_VERDICTS[Math.floor(Math.random() * SW_DICE_VERDICTS.length)];
-            var isYes = choice === 'СТОИТ';
-            var resClass = isYes ? 'res-yes' : 'res-no';
-            var final = isYes ? 'смотреть' : 'не смотреть';
-
+            var yes = Math.random() < 0.5;
+            var lastFace = rndFace(), step = 0;
             label.removeClass('res-yes res-no').addClass('hide');
-
-            var lastFace = 1; // текущая грань (изначально 1)
-            function getNextFace() {
-                var face;
-                do {
-                    face = rndFace();
-                } while (face === lastFace);
-                lastFace = face;
-                return face;
+            function nextFace(){
+                var f = rndFace();
+                if (f === lastFace) f = f % 6 + 1;
+                lastFace = f;
+                return f;
             }
-
-            var stepsLeft = 5;
-            function step() {
-                stepsLeft--;
-                var isLast = stepsLeft <= 0;
-                knockDice(dice, getNextFace(), function(){
-                    if (!document.body.contains(btn[0])) { window._sw_rolling = false; return; }
-                    if (isLast) {
-                        label.text(final).removeClass('hide').addClass(resClass);
-                        html.find('.sw-tab-btn').removeClass('sw-disabled');
-                        btn.removeClass('sw-rolling');
-                        window._sw_rolling = false;
-                    } else {
-                        setTimeout(step, 90);
-                    }
-                });
+            function animate(){
+                if (session !== _sw_session || window._sw_closed || !document.body.contains(btn[0])) return;
+                if (step >= 3) {
+                    label.text(yes ? 'смотреть' : 'не смотреть').removeClass('hide').addClass(yes ? 'res-yes' : 'res-no');
+                    btn.removeClass('sw-rolling');
+                    window._sw_rolling = false;
+                    return;
+                }
+                step++;
+                knockDice(dice, nextFace(), function(){ uiLater(animate, 55, session); });
             }
-            step();
+            animate();
         }
-
         btn.on('hover:hover', function(){ focusRing(btn, false); });
-        btn.on('hover:enter', rollDice);
-        btn.on('click', rollDice);
+        btn.on('hover:enter click', rollDice);
     }
 
     function clearLoader() {
@@ -1067,6 +1061,7 @@
     }
 
     function cleanupModal() {
+        clearUiTimers();
         window._sw_rolling = false;
         window._sw_activeInteractive = null;
         clearLoader();
@@ -1083,111 +1078,88 @@
     function doClose() {
         if (window._sw_closed) return;
         window._sw_closed = true;
-        cleanupModal();
         try {
-            if (window.Lampa && Lampa.Modal && typeof Lampa.Modal.close === 'function') {
-                Lampa.Modal.close();
-            }
+            if (window.Lampa && Lampa.Modal && typeof Lampa.Modal.close === 'function') Lampa.Modal.close();
         } catch(e) {}
+        cleanupModal();
     }
 
     function showModal(rawMovie, triggerBtn) {
+        if (Date.now() - _sw_openingAt < 350) return;
+        _sw_openingAt = Date.now();
+        var session = ++_sw_session;
+        clearUiTimers();
+        clearLoader();
         try {
             var movie = sanitizeMovie(rawMovie);
             window._sw_triggerElement = triggerBtn || null;
-
             try {
-                if (getSetting('reset_cache', '0') === '1') {
+                if (getSetting('reset_cache','0') === '1') {
                     _metaCache = {}; _domCache = null;
-                    if (window.Lampa && Lampa.Storage) Lampa.Storage.set(PLUGIN_ID + '_reset_cache', '0');
+                    if (window.Lampa && Lampa.Storage) Lampa.Storage.set(PLUGIN_ID + '_reset_cache','0');
                 }
             } catch(e) {}
-
             try {
                 if (window.Lampa && Lampa.Controller && Lampa.Controller.enabled()) {
                     window._sw_prevController = Lampa.Controller.enabled().name;
                 }
             } catch(e) { window._sw_prevController = 'full'; }
-
-            var cfg = getSettings();
-            var title = esc(movie.title || movie.name || 'Фильм');
             window._sw_closed = false;
-
-            var phases = [
-                'Сканирую вселенную кино…',
-                'Анализирую скрытые смыслы…',
-                'Проверяю настроение зрителей…',
-                'Считаю аргументы за и против…',
-                'Выношу окончательный вердикт…'
-            ];
-            var html = $('<div class="sw-wrap"><div id="sw-body"><div class="sw-loader"><div class="sw-loader-emoji">🔍</div><div class="sw-loader-text">' + phases[0] + '</div><div class="sw-loader-progress"></div></div></div></div>');
-            html.css('font-size', cfg.font_scale + 'px');
-            window._sw_currentModalHtml = html;
+            window._sw_rolling = false;
             window._sw_activeInteractive = null;
-
-            var pi = 0;
-            window._sw_loaderTimer = setInterval(function(){
-                pi = (pi + 1) % phases.length;
-                var t = html.find('.sw-loader-text');
-                if (t.length) t.text(phases[pi]);
-            }, 650);
-
-            if (window.Lampa && Lampa.Modal && typeof Lampa.Modal.open === 'function') {
-                Lampa.Modal.open({
-                    title: 'Стоит ли смотреть: ' + title,
-                    html: html,
-                    size: 'large',
-                    onBack: function(){
-                        if (window._sw_closed) return;
-                        window._sw_closed = true;
-                        cleanupModal();
-                    }
-                });
+            var html = $('<div class="sw-wrap"><div id="sw-body"><div class="sw-loader"><div class="sw-loader-emoji">🎬</div>' +
+                '<div class="sw-loader-text">Собираю сведения о фильме…</div><div class="sw-loader-progress"></div></div></div></div>');
+            html.css('font-size', getSettings().font_scale + 'px');
+            window._sw_currentModalHtml = html;
+            if (!window.Lampa || !Lampa.Modal || typeof Lampa.Modal.open !== 'function') {
+                window._sw_closed = true; return;
             }
-
-            if (window.Lampa && Lampa.Controller) {
-                Lampa.Controller.toggle(CONTROLLER_ID);
-            }
-
+            Lampa.Modal.open({
+                title: 'Стоит ли смотреть: ' + esc(movie.title || movie.name || 'Фильм'),
+                html: html, size: 'large',
+                onBack: function(){
+                    if (session !== _sw_session || window._sw_closed) return;
+                    window._sw_closed = true;
+                    cleanupModal();
+                }
+            });
+            if (Lampa.Controller) Lampa.Controller.toggle(CONTROLLER_ID);
             analyze(movie).then(function(a){
+                if (session !== _sw_session || window._sw_closed) return;
                 clearLoader();
-                if (window._sw_closed) return;
-
                 html.find('#sw-body').html('<div class="sw-body">' + buildReadyInner(a) + '</div>');
                 bindDice(html);
                 bindTabs(html);
-
-                setTimeout(function(){
+                uiLater(function(){
                     html.find('#sw-vword').addClass('appear');
                     html.find('.sw-meter-fill').each(function(){
                         this.style.width = (this.getAttribute('data-w') || 50) + '%';
                     });
-                    html.find('.sw-list li').each(function(i){
-                        var li = $(this);
-                        setTimeout(function(){ li.addClass('appear'); }, i * 30);
-                    });
-
-                    var firstFocus = html.find('#sw-dice-btn');
-                    if (firstFocus.length) {
-                        focusRing(firstFocus, false);
-                    }
-                }, 60);
+                    html.find('.sw-list li').addClass('appear');
+                    focusRing(html.find('#sw-dice-btn'), false);
+                }, 45, session);
             }).catch(function(err){
+                if (session !== _sw_session || window._sw_closed) return;
                 clearLoader();
                 console.error('[SW] analyze:', err);
-                html.find('#sw-body').html('<div class="sw-body" style="text-align:center;padding:40px 20px;color:#ff5252">⚠️ Ошибка анализа данных</div>');
+                html.find('#sw-body').html('<div class="sw-error">Не удалось собрать данные. Закройте окно и попробуйте снова.</div>');
             });
-        } catch(e) { console.error('[SW] showModal:', e); }
+        } catch(e) {
+            console.error('[SW] showModal:', e);
+            if (session === _sw_session) {
+                window._sw_closed = true;
+                clearUiTimers();
+            }
+        }
     }
 
     function addBtn(el, rawMovie) {
         try {
             if (!el || !el.length || el.find('.sw-custom-button-enhanced').length) return;
             var movie = sanitizeMovie(rawMovie);
-            var btn = $('<div class="full-start__button selector sw-custom-button-enhanced" data-type="should_watch" tabindex="0"><div class="full-start__icon">' + ICON + '</div><span>Стоит ли</span></div>');
+            var btn = $('<div class="full-start__button selector sw-custom-button-enhanced" data-type="should_watch" tabindex="0"><div class="full-start__icon">' + ICON + '</div><span>Стоит ли смотреть</span></div>');
 
-            btn.on('hover:enter', function(){ showModal(movie, btn); });
-            btn.on('click', function(){ showModal(movie, btn); });
+            btn.on('hover:enter click', function(){ showModal(movie, btn); });
 
             var anchor = el.find('.view--torrent,.view--online,.view--trailer').last();
             if (anchor.length) {
@@ -1198,10 +1170,10 @@
                     fb.append(btn);
                 } else {
                     var titleEl = el.find('.full-start__title,.full-card__title');
-                    if (titleEl.length) {
+                    if (false && titleEl.length) {
                         titleEl.after(btn);
                     } else {
-                        el.append(btn);
+                        return; // Wait for streaming/source actions container.
                     }
                 }
             }
@@ -1242,7 +1214,7 @@
             }
         } catch(e) {}
 
-        console.log('[ShouldWatch] v53.3 initialized: D-Pad left/right switch controls, up/down pure scroll to the very bottom.');
+        console.log('[ShouldWatch] v54.0: safer TMDB, calibrated verdicts, responsive TV navigation.');
     }
 
     try {
