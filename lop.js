@@ -1,6 +1,6 @@
 /**
  * Lampa Plugin: "Стоит ли смотреть?" (Should Watch?)
- * Version: 54.0 (intelligent verdicts, safer data, smoother interface)
+ * Version: 53.3 (D-Pad rework: left/right switch controls, up/down = pure content scroll)
  * Compliant with Lampa API, Memory-safe, Pure jQuery/DOM, Zero external dependencies.
  */
 (function () {
@@ -33,17 +33,6 @@
         overview: 'Кобб — талантливый вор, лучший из лучших в опасном искусстве извлечения: он крадёт ценные секреты из глубин подсознания во время сна.'
     };
 
-    var _sw_session = 0, _sw_openingAt = 0, _sw_uiTimers = [];
-    function uiLater(fn, ms, session) {
-        var t = setTimeout(function(){
-            if (session !== _sw_session || window._sw_closed) return;
-            fn();
-        }, ms);
-        _sw_uiTimers.push(t);
-        return t;
-    }
-    function clearUiTimers(){ _sw_uiTimers.forEach(clearTimeout); _sw_uiTimers = []; }
-
     var _metaCache = {};
     var _domCache = null;
 
@@ -72,7 +61,7 @@
         { re: /dystopia|антиутопи/i, text: '🏙 Антиутопия' },
         { re: /coming of age|взрослен/i, text: '🌱 История взросления' },
         { re: /cyberpunk|киберпанк/i, text: '🤖 Киберпанк' },
-        { re: /outer space|space travel|космос|moon mission|lunar|марс/i, text: '🚀 Космос' },
+        { re: /space|космос|moon|lunar|mars|марс/i, text: '🚀 Космос' },
         { re: /biographical|biopic|биограф/i, text: '📖 Биографическая история' }
     ];
 
@@ -115,7 +104,7 @@
             bad_genres: String(getSetting('bad_genres', '') || ''),
             bad_actors: String(getSetting('bad_actors', '') || ''),
             bad_directors: String(getSetting('bad_directors', '') || ''),
-            min_rating: isFinite(parseFloat(getSetting('min_rating', '6'))) ? parseFloat(getSetting('min_rating', '6')) : 6,
+            min_rating: parseFloat(getSetting('min_rating', '6')) || 6,
             font_scale: parseInt(getSetting('font_scale', '20')) || 20
         };
     }
@@ -147,13 +136,13 @@
     }
 
     function injectCSS() {
-        if (document.getElementById('sw-plugin-styles-v56')) return;
-        ['sw-plugin-styles-v51', 'sw-plugin-styles-v52', 'sw-plugin-styles-v53', 'sw-plugin-styles-v54', 'sw-plugin-styles-v55'].forEach(function(id){
+        if (document.getElementById('sw-plugin-styles-v55')) return;
+        ['sw-plugin-styles-v51', 'sw-plugin-styles-v52', 'sw-plugin-styles-v53', 'sw-plugin-styles-v54'].forEach(function(id){
             var old = document.getElementById(id);
             if (old && old.parentNode) old.parentNode.removeChild(old);
         });
         var s = document.createElement('style');
-        s.id = 'sw-plugin-styles-v56';
+        s.id = 'sw-plugin-styles-v55';
         s.innerHTML =
             // === Trigger button on full-card ===
             '.sw-custom-button-enhanced{cursor:pointer;position:relative;transition:background .25s ease,color .25s,transform .2s ease,box-shadow .25s;display:inline-flex;align-items:center;justify-content:center;border-radius:12px;user-select:none;overflow:hidden}' +
@@ -193,7 +182,7 @@
             '.sw-dice{position:absolute;left:16px;top:50%;width:44px;height:44px;margin-top:-22px}' +
             '.sw-dice-core{display:block;width:100%;height:100%;filter:drop-shadow(0 4px 6px rgba(0,0,0,.4));transform-origin:50% 100%;will-change:transform}' +
             '.sw-dice-core svg{width:100%;height:100%;display:block}' +
-            '.sw-dice-core.sw-knock{animation:swKnock .42s cubic-bezier(.33,.02,.17,1) both}' +
+            '.sw-dice-core.sw-knock{animation:swKnock .56s cubic-bezier(.33,.02,.17,1) both}' +
             '@keyframes swKnock{0%{transform:translateY(0) scale(1,1)}28%{transform:translateY(-18px) scale(1.04,1.04)}50%{transform:translateY(0) scale(1,1)}64%{transform:translateY(2px) scale(1.14,.8)}80%{transform:translateY(-4px) scale(.98,1.04)}100%{transform:translateY(0) scale(1,1)}}' +
             '.sw-dice-label{position:relative;font-family:var(--sw-mono);font-size:1.4em;font-weight:700;color:#fff;text-align:center;text-transform:lowercase;letter-spacing:.02em;transition:opacity .25s ease,transform .25s ease;pointer-events:none;padding:0 16px}' +
             '.sw-dice-label.hide{opacity:0;transform:translateY(8px)}' +
@@ -238,30 +227,6 @@
             '.sw-aud-arrow{width:1.1em;height:1.1em;flex:0 0 auto;margin-top:.12em}' +
             '.sw-focusable{outline:none;cursor:pointer}' +
             '@media(max-width:680px){.sw-columns{grid-template-columns:1fr}.sw-metrics-grid{grid-template-columns:1fr}.sw-verdict-word{font-size:1.8em}.sw-dice-label{font-size:1.2em}.sw-dice{width:38px;height:38px;margin-top:-19px;left:12px}.sw-dossier{padding:18px 14px 14px}}';
-        s.innerHTML +=
-            '.sw-wrap{--sw-green:#74d79a;--sw-red:#f1787b;--sw-orange:#f3bd68;--sw-ink:#f2f4f6;--sw-mut:#aeb5be;padding:12px 10px 32px;max-width:100%;line-height:1.45}' +
-            '.sw-dossier{background:linear-gradient(135deg,#242b31,#1d2227);border:1px solid rgba(255,255,255,.11);border-radius:18px;padding:22px;box-shadow:0 8px 20px rgba(0,0,0,.16)}' +
-            '.sw-verdict-word{font-size:clamp(1.5em,4vw,2.2em);letter-spacing:.015em;overflow-wrap:anywhere;margin-bottom:12px}' +
-            '.sw-why{font-size:.71em;color:#bec8d0;line-height:1.45;margin-top:13px}' +
-            '.sw-scale{display:flex;justify-content:space-between;color:#88939d;font-size:.61em;margin-top:6px}' +
-            '.sw-col{border-radius:14px;background:rgba(255,255,255,.025);box-shadow:none;border:1px solid rgba(255,255,255,.07);padding:16px}' +
-            '.sw-col.pros{border-left:3px solid var(--sw-green)}.sw-col.cons{border-left:3px solid var(--sw-red)}' +
-            '.sw-col-title{font-size:.9em;font-weight:700;margin-bottom:12px;color:#f3f5f6}' +
-            '.sw-list{font-size:.86em;line-height:1.45}.sw-list li{margin-bottom:10px}' +
-            '.sw-tabs{gap:10px}.sw-tab-btn{font-family:' + FONT + ';font-size:.88em;border-radius:12px;min-height:50px}' +
-            '.sw-tab-btn.active{border-color:rgba(255,255,255,.25)}.sw-tab-btn.focus,.sw-dicebtn.focus{box-shadow:0 0 0 2px #f2f3f4,0 4px 14px rgba(0,0,0,.24)}' +
-            '.sw-dicebtn{height:64px;margin-bottom:6px;border-radius:13px;box-shadow:none}.sw-dice-label{font-family:' + FONT + ';font-size:1.1em}' +
-            '.sw-dice-hint{font-size:.68em;text-align:center;color:#99a5ae;margin:0 0 18px}' +
-            '.sw-note{font-size:.72em;line-height:1.4;color:#aeb7bf;margin:0 0 12px}' +
-            '.sw-error{padding:45px 20px;text-align:center;color:#ef9e9e}' +
-            '.sw-metric-card,.sw-audience-box{box-shadow:none;background:rgba(255,255,255,.025)}' +
-            '.sw-metric-score.hi,.sw-metric-score.mid,.sw-metric-score.ok{color:#f0f2f4}' +
-            '.sw-body{animation:swPaneIn .28s cubic-bezier(.2,.7,.2,1)}' +
-            '.sw-list li,.sw-metric-card{will-change:auto;transition-duration:.27s}' +
-            '.sw-verdict-word,.sw-meter-fill,.sw-dice-core{will-change:auto}' +
-            '.sw-dicebtn:not(.sw-rolling) .sw-dice{animation:none}' +
-            '@media(max-width:600px){.sw-wrap{padding:10px 4px 30px}.sw-columns,.sw-metrics-grid{grid-template-columns:1fr}.sw-dossier{padding:17px}.sw-tab-btn{font-size:.78em}.sw-dice-label{font-size:.95em}}' +
-            '@media(prefers-reduced-motion:reduce){.sw-wrap *, .sw-wrap *::before,.sw-wrap *::after{animation:none!important;transition-duration:.01ms!important;scroll-behavior:auto!important}}';
         document.head.appendChild(s);
     }
 
@@ -270,13 +235,13 @@
     function hasGenre(g, re) { return g.some(function(x){ return re.test((x || '').toLowerCase()); }); }
     function inText(s, re) { return re.test((s || '').toLowerCase()); }
     function inAnyText(texts, re) { return texts.some(function(s){ return inText(s, re); }); }
-    function mediaType(m) { return (m && (m.media_type === 'tv' || m.first_air_date || m.number_of_seasons || (m.name && !m.title))) ? 'tv' : 'movie'; }
+    function mediaType(m) { return (m && m.name && !m.title) ? 'tv' : 'movie'; }
     function uniq(arr) { return arr.filter(function(v,i,s){ return s.indexOf(v) === i; }); }
     function fmtN(n) { return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ' '); }
 
     function sanitizeMovie(movie) {
-        if (!movie || typeof movie !== 'object') return { title: 'Неизвестный фильм' };
-        if (!movie.id && !movie.tmdb_id && !movie.title && !movie.name) return { title: 'Неизвестный фильм' };
+        if (!movie || typeof movie !== 'object') return DEMO_DATA;
+        if (!movie.id && !movie.tmdb_id && !movie.title && !movie.name) return DEMO_DATA;
         return movie;
     }
 
@@ -326,7 +291,7 @@
     function interactiveSet() {
         var h = window._sw_currentModalHtml;
         if (!h || !h.length) return $();
-        return h.find('.sw-focusable:not(.sw-disabled)').filter(':visible');
+        return h.find('.sw-focusable').filter(':visible');
     }
 
     function swScrollToFocus(targetEl) {
@@ -378,6 +343,7 @@
         if (!window._sw_activeInteractive) return;
         var el = $(window._sw_activeInteractive);
         if (el.length) {
+            el.trigger('hover:enter');
             el.trigger('click');
         }
     }
@@ -396,7 +362,6 @@
             left: function () { moveFocus(-1); },
             right: function () { moveFocus(1); },
             enter: function () { triggerActiveAction(); },
-            ok: function () { triggerActiveAction(); }, // Lampa TV builds may dispatch ok, not enter
             back: function () { doClose(); }
         });
     }
@@ -421,7 +386,7 @@
         for (var i = 0; i < genresRaw.length; i++) {
             var g = genresRaw[i];
             if (g && typeof g === 'object') {
-                if (g.id && ids.indexOf(Number(g.id)) >= 0) return true;
+                if (g.id && ids.indexOf(g.id) >= 0) return true;
                 if (nameRe.test((g.name || '').toLowerCase())) return true;
             } else if (typeof g === 'string') {
                 if (nameRe.test(g.toLowerCase())) return true;
@@ -432,25 +397,18 @@
 
     function loadCredits(movie) {
         try {
-            if (movie.credits && ((movie.credits.cast && movie.credits.cast.length) ||
-                (movie.credits.crew && movie.credits.crew.length))) {
+            if (movie.credits && ((movie.credits.cast && movie.credits.cast.length) || (movie.credits.crew && movie.credits.crew.length))) {
                 return Promise.resolve(movie.credits);
             }
             var id = movie.id || movie.tmdb_id;
-            if (!id || !window.Lampa || !Lampa.TMDB || typeof Lampa.TMDB.credits !== 'function') {
-                return Promise.resolve(null);
+            if (!id) return Promise.resolve(null);
+            if (window.Lampa && Lampa.TMDB && typeof Lampa.TMDB.credits === 'function') {
+                return new Promise(function(res){
+                    Lampa.TMDB.credits(id, function(d){ res(d && !d.status_code ? d : null); }, function(){ res(null); });
+                });
             }
-            return new Promise(function(resolve){
-                var settled = false, timer = setTimeout(function(){ done(null); }, 7000);
-                function done(result) {
-                    if (settled) return;
-                    settled = true; clearTimeout(timer);
-                    resolve(result && !result.status_code ? result : null);
-                }
-                try { Lampa.TMDB.credits(id, done, function(){ done(null); }); }
-                catch(e) { done(null); }
-            });
-        } catch(e) { return Promise.resolve(null); }
+        } catch(e) {}
+        return Promise.resolve(null);
     }
 
     function tmdbKey() {
@@ -466,29 +424,16 @@
     }
 
     function tmdbGet(path, lang) {
-        return new Promise(function(resolve) {
-            var complete = false;
-            var timer = setTimeout(function(){ finish(null); }, 7000);
-            function finish(data) {
-                if (complete) return;
-                complete = true;
-                clearTimeout(timer);
-                resolve(data && !data.status_code ? data : null);
-            }
+        return new Promise(function(res){
             try {
                 var langCode = lang || curLangCode();
-                var url = 'https://api.themoviedb.org/3' + path +
-                    (path.indexOf('?') > -1 ? '&' : '?') +
-                    'language=' + encodeURIComponent(langCode) +
-                    '&api_key=' + encodeURIComponent(tmdbKey());
+                var url = 'https://api.themoviedb.org/3' + path + (path.indexOf('?') > -1 ? '&' : '?') + 'language=' + langCode + '&api_key=' + tmdbKey();
                 if (window.Lampa && Lampa.Request && typeof Lampa.Request.get === 'function') {
-                    Lampa.Request.get(url, finish, function(){ finish(null); }, { dataType: 'json' });
-                } else if (typeof fetch === 'function') {
-                    fetch(url).then(function(response){
-                        return response.ok ? response.json() : null;
-                    }).then(finish).catch(function(){ finish(null); });
-                } else finish(null);
-            } catch(e) { finish(null); }
+                    Lampa.Request.get(url, function(d){ res(d && d.status_code ? null : d); }, function(){ res(null); }, { dataType: 'json' });
+                } else if (typeof fetch !== 'undefined') {
+                    fetch(url).then(function(r){ return r.json(); }).then(function(d){ res(d && d.status_code ? null : d); }).catch(function(){ res(null); });
+                } else res(null);
+            } catch(e) { res(null); }
         });
     }
 
@@ -498,70 +443,47 @@
 
     function loadMeta(movie) {
         var id = movie.id || movie.tmdb_id;
-        var empty = { kw: [], age: null, reviews: [], hasTrailer: false,
-            enOv: '', popularity: 0, details: null };
-        if (!id) return Promise.resolve(empty);
-        var type = mediaType(movie), cacheKey = type + ':' + id;
-        if (_metaCache[cacheKey]) return Promise.resolve(_metaCache[cacheKey]);
+        if (!id) return Promise.resolve({ kw: [], age: null, reviews: [], hasTrailer: false, enOv: '', popularity: 0 });
+        if (_metaCache[id]) return Promise.resolve(_metaCache[id]);
         if (Object.keys(_metaCache).length > 120) _metaCache = {};
-        // TMDB append_to_response makes 2 HTTP requests instead of 6.
-        // EN data supplies reviews and trailers which are frequently absent in RU.
-        var ratingPart = type === 'tv' ? 'content_ratings' : 'release_dates';
-        var pending = Promise.all([
-            tmdbGet('/' + type + '/' + id +
-                '?append_to_response=keywords,credits,' + ratingPart),
-            tmdbGet('/' + type + '/' + id +
-                '?append_to_response=reviews,videos', 'en-US')
-        ]).then(function(arr) {
-            var main = arr[0] || {}, en = arr[1] || {};
-            var keys = main.keywords || en.keywords || {};
-            var kw = (keys.keywords || keys.results || []).map(function(x){
-                return x && x.name ? x.name.toLowerCase() : '';
-            }).filter(Boolean);
-            var age = null, certificates = main[ratingPart];
-            if (certificates && certificates.results) {
-                function cert(region) {
-                    if (!region) return null;
-                    if (type === 'tv') return region.rating || null;
-                    var dates = region.release_dates || [];
-                    for (var k = 0; k < dates.length; k++) {
-                        if (dates[k].certification) return dates[k].certification;
-                    }
-                    return null;
+        var type = mediaType(movie);
+        return Promise.all([
+            tmdbGet('/' + type + '/' + id + '/keywords'),
+            tmdbGet('/' + type + '/' + id + '/content_ratings'),
+            tmdbGet('/' + type + '/' + id + '/reviews'),
+            tmdbGet('/' + type + '/' + id + '/videos'),
+            tmdbGet('/' + type + '/' + id, 'en-US'),
+            tmdbGet('/' + type + '/' + id)
+        ]).then(function(arr){
+            var kw = [];
+            if (arr[0]) (arr[0].keywords || arr[0].results || []).forEach(function(k){ if (k && k.name) kw.push(k.name.toLowerCase()); });
+            var age = null;
+            if (arr[1] && arr[1].results) {
+                var ru = arr[1].results.find(function(x){ return x.iso_3166_1 === 'RU'; });
+                var us = arr[1].results.find(function(x){ return x.iso_3166_1 === 'US'; });
+                if (ru && ru.rating) { var n = parseInt(ru.rating); if (!isNaN(n)) age = n; }
+                if (age === null && us && us.rating) age = mapUSRating(us.rating);
+                if (age === null && arr[1].results.length) {
+                    var f = arr[1].results[0];
+                    if (f.rating) { var n2 = parseInt(f.rating); age = !isNaN(n2) ? n2 : mapUSRating(f.rating); }
                 }
-                var ru = certificates.results.filter(function(x){ return x.iso_3166_1 === 'RU'; })[0];
-                var us = certificates.results.filter(function(x){ return x.iso_3166_1 === 'US'; })[0];
-                var ruCert = cert(ru), usCert = cert(us);
-                if (ruCert) {
-                    var n = parseInt(ruCert, 10);
-                    if (isFinite(n) && n >= 0 && n <= 21) age = n;
-                }
-                if (age === null && usCert) age = mapUSRating(usCert);
             }
-            var reviewItems = (en.reviews && en.reviews.results) ||
-                (main.reviews && main.reviews.results) || [];
-            var reviews = reviewItems.slice(0, 6).map(function(r){
-                return { author: r.author || 'Аноним',
-                    text: (r.content || '').replace(/<[^>]+>/g,'').trim() };
-            }).filter(function(r){ return r.text.length > 20; });
-            var videos = (en.videos && en.videos.results) ||
-                (main.videos && main.videos.results) || [];
-            var r = { kw: kw, age: age, reviews: reviews,
-                hasTrailer: videos.some(function(v){
-                    return v.type === 'Trailer' && v.site === 'YouTube';
-                }),
-                enOv: en.overview || '', popularity: main.popularity || en.popularity || 0,
-                details: arr[0] || arr[1] || null };
-            // Transient network errors shouldn't poison subsequent attempts.
-            if (arr[0] || arr[1]) _metaCache[cacheKey] = r;
-            else delete _metaCache[cacheKey];
+            var reviews = [];
+            if (arr[2] && arr[2].results) {
+                reviews = arr[2].results.slice(0, 6).map(function(r){
+                    return { author: r.author || 'Аноним', text: (r.content || '').replace(/<[^>]+>/g, '').trim() };
+                }).filter(function(r){ return r.text.length > 20; });
+            }
+            var hasTrailer = false;
+            if (arr[3] && arr[3].results) {
+                hasTrailer = arr[3].results.some(function(v){ return v.type === 'Trailer' && v.site === 'YouTube' });
+            }
+            var enOv = (arr[4] && arr[4].overview) ? arr[4].overview : '';
+            var popularity = (arr[5] && arr[5].popularity) ? arr[5].popularity : 0;
+            var r = { kw: kw, age: age, reviews: reviews, hasTrailer: hasTrailer, enOv: enOv, popularity: popularity };
+            _metaCache[id] = r;
             return r;
-        }).catch(function(){
-            delete _metaCache[cacheKey];
-            return empty;
         });
-        _metaCache[cacheKey] = pending;
-        return pending;
     }
 
     function hasKw(ctx, re) { return ctx.kw.some(function(k){ return re.test(k); }); }
@@ -580,9 +502,43 @@
     }
 
     function readDomSignals(key) {
-        // Never scrape body.innerText: it can contain other films, reviews and age labels.
-        // Only reliable per-title API data may influence the recommendation.
-        return { mm: {}, moods: [], ok: false, age: null, reviews: [] };
+        if (_domCache && _domCache.key === key) return _domCache.data;
+        var out = { mm: {}, moods: [], ok: false, age: null, reviews: [] };
+        try {
+            var txt = (document.body.innerText || '').substring(0, 25000);
+            var amAll = txt.match(/\b(0|6|12|16|18)\+/g);
+            if (amAll) {
+                for (var i = 0; i < amAll.length; i++) {
+                    var v3 = parseInt(amAll[i], 10);
+                    if (!isNaN(v3) && (out.age === null || v3 > out.age)) out.age = v3;
+                }
+            }
+            var mm = {}, found = 0;
+            DOM_METRICS.forEach(function(p){
+                var r = txt.match(p.re);
+                if (r) { mm[p.key] = parseFloat(r[1].replace(',', '.')); found++; }
+            });
+            var moods = [];
+            var mi = txt.indexOf('Настроения');
+            if (mi > -1) {
+                var chunk = txt.substring(mi + 10, mi + 1600);
+                var re = /(\d{1,3})\s*%\s*\n?\s*([А-Яа-яЁёA-Za-z][А-Яа-яЁёA-Za-z….-]{2,24})/g, r2;
+                while ((r2 = re.exec(chunk)) && moods.length < 12) moods.push({ name: r2[2].trim(), pct: parseInt(r2[1]) });
+            }
+            if (found >= 3 || moods.length >= 3) { out.mm = mm; out.moods = moods; out.ok = true; }
+            var ci = txt.indexOf('Комментарии');
+            if (ci > -1) {
+                var lines = txt.substring(ci + 11, ci + 6000).split(/\n+/);
+                for (var i2 = 0; i2 < lines.length && out.reviews.length < 6; i2++) {
+                    var ln = lines[i2].trim();
+                    if (!ln) continue;
+                    if (/^(Сезон|Режиссёр|Актёры|Производство|Теги|Настроения|Подробно)/.test(ln)) break;
+                    if (ln.length >= 40) out.reviews.push({ author: 'зритель', text: ln });
+                }
+            }
+        } catch(e) {}
+        _domCache = { key: key, data: out };
+        return out;
     }
 
     function lampaLocal(movie) {
@@ -643,26 +599,19 @@
 
     function analyze(rawMovie) {
         var movie = sanitizeMovie(rawMovie);
-        return Promise.all([loadMeta(movie), Promise.resolve(lampaLocal(movie))]).then(function(arr){
-            var meta = arr[0], local = arr[1];
-            var credits = movie.credits || (meta.details && meta.details.credits) || null;
+        return Promise.all([loadCredits(movie), loadMeta(movie), Promise.resolve(lampaLocal(movie))]).then(function(arr){
+            var credits = arr[0], meta = arr[1], local = arr[2];
             var cfg = getSettings();
             var blG = parseBL(cfg.bad_genres), blA = parseBL(cfg.bad_actors), blD = parseBL(cfg.bad_directors);
             var now = new Date().getFullYear();
             var q = (movie.quality || movie.source_quality || '').toString().toUpperCase();
-            var rating = Number(movie.vote_average || 0), votes = Number(movie.vote_count || 0);
-            if (!isFinite(rating) || rating < 0 || rating > 10) rating = 0;
-            if (!isFinite(votes) || votes < 0) votes = 0;
-            if (!votes && meta.details && meta.details.vote_count) {
-                votes = Number(meta.details.vote_count) || 0;
-                rating = Number(meta.details.vote_average) || rating;
-            }
-            var runtime = parseInt(movie.runtime, 10) || 0;
-            var genresRaw = (movie.genres && movie.genres.length ? movie.genres : (meta.details && meta.details.genres) || []);
+            var rating = parseFloat(movie.vote_average) || 0;
+            var votes = parseInt(movie.vote_count) || 0;
+            var runtime = parseInt(movie.runtime) || 0;
+            var genresRaw = movie.genres || [];
             var genres = genresRaw.map(function(g){ return typeof g === 'string' ? g : (g && g.name) || ''; }).filter(Boolean);
-            var ovRu = (movie.overview || (meta.details && meta.details.overview) || '').trim(), ovEn = (meta.enOv || '').trim(), ovBoth = [ovRu, ovEn];
-            var firstDate = movie.release_date || movie.first_air_date || (meta.details && (meta.details.release_date || meta.details.first_air_date)) || '';
-            var yr = firstDate ? parseInt(String(firstDate).substring(0,4),10) : 0;
+            var ovRu = (movie.overview || '').trim(), ovEn = (meta.enOv || '').trim(), ovBoth = [ovRu, ovEn];
+            var yr = movie.release_date ? parseInt(movie.release_date.substring(0, 4)) : 0;
             var dom = readDomSignals(movie.id || movie.tmdb_id || 'x');
             var mm = dom.ok ? dom.mm : {}, moods = dom.ok ? dom.moods : [];
             var domRevs = dom.reviews || [];
@@ -680,7 +629,7 @@
             var hasFamilyGenre = genreByIdOrName(genresRaw, [GENRE_ID_FAMILY, GENRE_ID_KIDS], /family|семейн|kids|детск/);
             var kidsKw = hasKw(ctx, /for kids|children|family-friendly|детям|семейн|для детей|preschool|toddler|baby|nursery|cartoon for kids|kids tv|educational|animated series|дошкольн|малыш/i);
 
-            var age = meta.age;
+            var age = dom.age !== null ? dom.age : meta.age;
 
             function dim(kwRe, ovRe) {
                 var k = hasKw(ctx, kwRe);
@@ -689,7 +638,7 @@
             }
 
             var dViol = dim(/violenc|violent|gore|murder|blood|tortur|brutal|weapon|massacre|execution|stab|slaughter|gunfight|shootout|hitman|serial killer|battle/, /убийств|насил|жесток|кровь|крови|кровью|кровав|кровопролит|стрельб|перестрел|взрыв|оружи|резн|террор|бойн/);
-            var dDrugs = dim(/drug|meth lab|methamphetamine|crystal meth|cocaine|heroin|marijuan|cannabis|narcotic|addiction|overdose|dealer|cartel|crack|lsd|ecstasy|opium/, /метамфетам|амфетам|наркот|кокаин|героин|марихуан|лсд|экстази|опиум|дилер|картел|зависимост/);
+            var dDrugs = dim(/drug|meth lab|methamphetamine|crystal meth|cocaine|heroin|marijuan|cannabis|narcotic|addiction|overdose|dealer|cartel|crack|lsd|ecstasy|opium/, /метамфетам|амфетам|наркот|кокаин|героин|марихуан|лсд|экстази|опиум|дилер|картел|зависимост|зелье|травк|варит/);
             var dNud = dim(/nudity|topless|strip club|stripper|full frontal|rear nudity/, /обнаж|нагот|голы|стриптиз/);
             var dSex = dim(/sex scene|sexual content|orgy|prostitut|erotic|one night stand|hooker|threesome|explicit/, /эротик|откровенн|проститут|интим|секс|постельн|презерватив/);
             var dSmoke = dim(/smoking|cigarette|cigar/, /курени|сигарет|табак/);
@@ -754,14 +703,14 @@
             if (votes >= 3000 && adj >= 8.0) add('card','pro','✨ Высокий рейтинг: ' + rating.toFixed(1) + ' (' + fmtN(votes) + ' голосов)', 30, 'ratehi');
             else if (votes >= 500 && adj >= cfg.min_rating) add('card','pro','✨ Хороший рейтинг: ' + rating.toFixed(1) + ' (' + fmtN(votes) + ' голосов)', 20, 'ratehi');
             else if (votes >= 100 && adj >= cfg.min_rating) add('card','pro','✨ Достойный рейтинг: ' + rating.toFixed(1) + ' (' + fmtN(votes) + ' голосов)', 14, 'ratehi');
-            if (votes >= 100 && votes < 1500 && adj >= 7.6) add('card','pro','🔍 Высоко оценённый малоизвестный фильм', 12);
+            if (votes > 0 && votes < 1500 && adj >= 7.6) add('card','pro','🔍 Скрытая жемчужина', 12);
             if (votes >= 2000 && adj >= 7.8 && yr > 0 && yr <= now - 5) add('card','pro','🏛 Культурное признание', 12);
             if (yr === now) add('card','pro','🆕 Новинка ' + yr + ' года', 6, 'fresh');
             if (votes > 0 && votes < 100) add('card','con','❓ Мало оценок (' + votes + ')', 14, 'rateunc');
             if (votes === 0) add('card','con','⚠️ Нет оценок', 16, 'rateunc');
             if (votes >= 100 && adj < cfg.min_rating) add('card','con','📉 Рейтинг ниже порога: ' + rating.toFixed(1), 22, 'ratelow');
             else if (votes >= 50 && rating > 0 && rating < 5) add('card','con','📉 Низкий рейтинг: ' + rating.toFixed(1), 26, 'ratelow');
-            if (runtime > 0 && runtime <= 95 && mediaType(movie) === 'movie') add('card','pro','⏱ Небольшой хронометраж: ' + runtime + ' мин', 7, 'runtime');
+            if (runtime > 0 && runtime <= 95) add('card','pro','⏱ Короткометражка: ' + runtime + ' мин', 7, 'runtime');
             else if (runtime > 150) add('card','con','⌛ Долгий хронометраж: ' + runtime + ' мин', 12, 'runtime');
             if (/CAM|TS|HDCAM|HDRIP|TELECINE|SCR|WORKPRINT|TELESYNC/i.test(q)) add('card','con','📺 Экранная копия / низкое качество', 26, 'quality');
             else if (/4K|UHD|2160p/i.test(q)) add('card','pro','🎥 Доступно в 4K UHD', 10, 'quality');
@@ -775,19 +724,19 @@
             else if (familyOK) add('tmdb','pro','👨‍👩‍👧 Семейный фильм' + (age !== null ? ' (' + age + '+)' : ''), 16, 'family');
             if (age !== null && age >= 18) add('tmdb','con','🔞 Возрастное ограничение 18+', 14, 'age');
             else if (age !== null && age >= 16) add('tmdb','con','🔞 Возрастное ограничение 16+', 12, 'age');
-            if (isAnim && !familyOK && (age !== null && age >= 16 || hardAdult)) add('tmdb','con','🎭 Взрослая анимация' + (age !== null ? ' (' + age + '+)' : ''), 14, 'adultanim');
+            if (isAnim && !familyOK) add('tmdb','con','🎭 Взрослая анимация' + (age !== null ? ' (' + age + '+)' : ''), 14, 'adultanim');
 
-            if (cViol >= 50) add('tmdb','con','⚠️ Возможное насилие/жестокость', 16, 'violence');
+            if (cViol >= 50) add('tmdb','con','🔪 Сцены насилия и жестокости', 16, 'violence');
             if (cDrugs >= 30) add('tmdb','con','💉 Упоминание веществ/наркотиков', 14, 'drugs');
-            if (cSex >= 30) add('tmdb','con','⚠️ Темы сексуального характера', 12, 'sex');
+            if (cSex >= 30) add('tmdb','con','🫣 Откровенные сцены', 12, 'sex');
             if (cProf >= 40) add('tmdb','con','🤬 Ненормативная лексика', 10, 'lang');
-            if (cFear >= 40) add('moods','con','😱 Хоррор / страшные темы', 14, 'scare');
+            if (cFear >= 40) add('moods','con','😱 Слишком страшно / хоррор', 14, 'scare');
             else if ((mm.fear||0) >= 3.5) add('moods','pro','😬 Напряжённый сюжет', 9, 'tension');
             if (cSuic >= 40) add('tmdb','con','⚠️ Тяжёлые темы / суицид', 16, 'suic');
             if (cAlc >= 40) add('tmdb','con','🍺 Сцены алкоголя/опьянения', 6, 'alc');
             if (cSmoke >= 40) add('tmdb','con','🚬 Сцены курения', 5, 'smoke');
             if (cGamb >= 40) add('tmdb','con','🎰 Азартные игры', 10, 'gamb');
-            if (cCrime >= 50) add('tmdb','pro','🕵️ Криминальный сюжет', 8, 'crime');
+            if (cCrime >= 50) add('tmdb','con','⚖️ Криминальный фокус', 8, 'crime');
             if (dPsych.k || dPsych.o) add('tmdb','con','🧠 Психологическое давление', 8, 'psych');
             if (dIll.k || dIll.o) add('tmdb','con','🏥 Тема неизлечимой болезни', 6, 'ill');
             if (dWar.k || dWar.o) add('tmdb','con','🎖 Военные действия', 8, 'war');
@@ -813,57 +762,53 @@
             });
             if (hasGenre(genres, /comedy|комедия/i) && (mm.sadness || 0) <= 3) add('moods','pro','😂 Комедийный жанр', 10, 'fun');
 
-            if (rt.total >= 4 && rt.pos >= 3 && rt.tone === 'pos') add('reviews','pro','💬 ' + who + ' в восторге', 20, 'rev');
-            else if (rt.total >= 4 && rt.neg >= 3 && rt.tone === 'neg') add('reviews','con','💬 ' + who + ' раскритиковали', 22, 'rev');
-            else if (rt.total >= 4 && rt.pos >= 2 && rt.neg >= 2 && rt.tone === 'mix') add('reviews','pro','💬 Мнения разделились', 10, 'rev');
+            if (rt.total >= 2 && rt.tone === 'pos') add('reviews','pro','💬 ' + who + ' в восторге', 20, 'rev');
+            else if (rt.total >= 2 && rt.tone === 'neg') add('reviews','con','💬 ' + who + ' раскритиковали', 22, 'rev');
+            else if (rt.total >= 2 && rt.tone === 'mix') add('reviews','pro','💬 Мнения разделились', 10, 'rev');
 
             if (local.inFavorite && local.favList === 'viewed') add('lampa','con','👁 Уже просмотрено вами', 8, 'lampa');
             else if (local.inFavorite) add('lampa','pro','🔖 Сохранено в закладках', 8, 'lampa');
             if (local.viewedPercent >= 90) add('lampa','con','👁 Досмотрено до конца (' + local.viewedPercent + '%)', 8, 'lampa');
             else if (local.viewedPercent >= 10) add('lampa','con','⏸ Приостановлено на ' + local.viewedPercent + '%', 12, 'lampa');
 
-            // Objective clues (4K, trailers, runtime, keywords, bookmarks)
-            // may enrich the explanation but must not dictate whether to watch.
-            var ratingConf = votes ? Math.min(1, Math.log(1 + votes) / Math.log(1501)) : 0;
-            var baseScore = votes ? (adj - cfg.min_rating) * 30 * ratingConf : 0;
-            var reviewScore = rt.total >= 4 && Math.abs(rt.pos - rt.neg) >= 3
-                ? Math.max(-9, Math.min(9, (rt.pos - rt.neg) * 2)) : 0;
-            var prefsPenalty = (mG.length ? 42 : 0) + (mA.length ? 26 : 0) + (mD.length ? 28 : 0);
-            var score = Math.max(-100, Math.min(100, Math.round(baseScore + reviewScore - prefsPenalty)));
-            // Explicitly disliked genres/authors/performers matter more than
-            // an average public rating, even for critically acclaimed titles.
-            if (mG.length) score = Math.min(score, -36);
-            else if (mA.length || mD.length) score = Math.min(score, -24);
-            var lowConf = votes < 40;
-            var confidence = votes >= 1500 ? 'высокая' : votes >= 150 ? 'средняя' : 'низкая';
-            var meterW = Math.max(7, Math.min(93, Math.round(50 + score * 0.43)));
-            var vClass, vWord;
-            if (lowConf && !prefsPenalty) {
-                vClass = 'meh'; vWord = 'МАЛО ДАННЫХ';
-            } else if (score > 16) {
-                vClass = 'yes'; vWord = 'СТОИТ';
-            } else if (score < -16) {
-                vClass = 'no'; vWord = 'НЕ СТОИТ';
-            } else {
-                vClass = 'meh'; vWord = 'СПОРНО';
-            }
-            var why = votes
-                ? 'TMDB: ' + rating.toFixed(1) + '/10 · ' + fmtN(votes) + ' оценок · уверенность: ' + confidence
-                : 'Недостаточно оценок для надёжного вывода';
-            if (prefsPenalty) why += ' · учтены ваши исключения';
+            var CAPS = { card: 55, user: 50, tmdb: 45, moods: 40, reviews: 28, lampa: 18, sparkle: 60 };
+            var per = {};
+            var sumPro = 0, sumCon = 0;
+            F.forEach(function(f){
+                var s = per[f.src] || (per[f.src] = { pro: 0, con: 0 });
+                s[f.kind] += f.w;
+                if (f.kind === 'pro') sumPro += f.w; else sumCon += f.w;
+            });
+            var score = 0;
+            Object.keys(per).forEach(function(k){
+                var cap = CAPS[k] || 40;
+                score += Math.min(per[k].pro, cap) - Math.min(per[k].con, cap);
+            });
+            var metaRich = !!(meta.kw.length || meta.reviews.length);
+            var activeSrc = 1 + (metaRich ? 1 : 0) + (rt.total >= 2 ? 1 : 0) + (dom.ok || moods.length ? 1 : 0) + (local.inFavorite || local.viewedPercent > 0 ? 1 : 0);
+            var lowConf = activeSrc <= 2;
+            if (lowConf) score = Math.round(score * 0.6);
+            if (score > 100) score = 100; if (score < -100) score = -100;
 
+            var meterW = (sumPro + sumCon) > 0 ? Math.round(100 * sumPro / (sumPro + sumCon)) : 50;
+            if (meterW < 5) meterW = 5; if (meterW > 95) meterW = 95;
+
+            var vClass, vWord;
+            if (score > 15) { vClass = 'yes'; vWord = 'СТОИТ'; }
+            else if (score < -15) { vClass = 'no'; vWord = 'НЕ СТОИТ'; }
+            else { vClass = 'meh'; vWord = 'СПОРНО'; }
 
             var sortF = function(a,b){ return b.w - a.w; };
             var pros = F.filter(function(f){ return f.kind === 'pro'; }).sort(sortF).map(function(f){ return f.text; });
             var cons = F.filter(function(f){ return f.kind === 'con'; }).sort(sortF).map(function(f){ return f.text; });
             var prosEmpty = !pros.length;
             var consEmpty = !cons.length;
-            if (prosEmpty) pros.push('ℹ️ Мало подтверждённых преимуществ');
-            if (consEmpty) cons.push('ℹ️ Подтверждённых недостатков не найдено');
+            if (prosEmpty) pros.push('ℹ️ Нет данных для анализа');
+            if (consEmpty) cons.push((blG.length || blA.length || blD.length) ? '✅ Фильтры и ограничения чисты' : '✅ Минусов нет');
 
             // === Улучшенное определение темпа (mPace) ===
             var paceHeuristic = 5.5;
-            var hasFastGenres = hasGenre(genres, /action|боевик|приключен|adventure|триллер|thriller|шпионский|spy|спорт|sport|sports/i);
+            var hasFastGenres = hasGenre(genres, /action|боевик|приключен|adventure|триллер|thriller|криминал|crime|военный|war|шпионский|spy|спорт|sport|sports|вестерн|western|музыка|musical|music/i);
             if (hasFastGenres) {
                 paceHeuristic = 8.5;
             } else if (hasGenre(genres, /комедия|comedy|семейн|family|анимация|animation|мульт/i)) {
@@ -879,18 +824,17 @@
             if (mm.action > 6) {
                 paceHeuristic = Math.max(paceHeuristic, 8.5);
             }
-            var mPace = mm.pace > 0 ? mm.pace : paceHeuristic;
+            var mPace = mm.pace > 0 ? Math.max(mm.pace, paceHeuristic) : paceHeuristic;
 
             // Остальные метрики...
             var dramaHeuristic = (hasGenre(genres, /драма|drama|биография|biography|исторический|historical/i) ? 8.2 : (rating >= 8 ? 7.0 : 5.0));
-            var mDrama = mm.sadness > 0 ? mm.sadness : dramaHeuristic;
+            var mDrama = mm.sadness > 0 ? Math.max(mm.sadness, dramaHeuristic) : dramaHeuristic;
 
-            var mFear = mm.fear > 0 ? mm.fear : (hasGenre(genres, /horror|ужасы|хоррор/i) ? 8.5 : (hasGenre(genres, /thriller|триллер/i) ? 6.7 : 2.5));
+            var mFear = mm.fear > 0 ? mm.fear : (hasGenre(genres, /ужасы|хоррор/i) ? 8.8 : (hasGenre(genres, /триллер/i) ? 7.2 : 2.5));
 
-            var immersionHeuristic = (hasGenre(genres, /фантастика|science fiction|sci-fi|фэнтези|fantasy|приключения|adventure/i) ? 7.5 : 5.5);
-            var mImmersion = immersionHeuristic;
+            var immersionHeuristic = (hasGenre(genres, /фантастика|sci-fi|фэнтези|fantasy|приключения|adventure/i) ? 8.5 : (rating >= 7.5 ? 7.5 : 5.5));
+            var mImmersion = rating >= 7.8 ? 8.9 : (rating >= 6.8 ? Math.max(7.2, immersionHeuristic) : immersionHeuristic);
 
-            var metricsEstimated = !dom.ok;
             var atmosMetrics = [
                 { key: 'pace', name: 'Темп', score: Math.min(10, Math.max(1, +(mPace).toFixed(1))) },
                 { key: 'fear', name: 'Напряжение', score: Math.min(10, Math.max(1, +(mFear).toFixed(1))) },
@@ -951,8 +895,7 @@
             return {
                 movie: movie, pros: pros, cons: cons, prosEmpty: prosEmpty, consEmpty: consEmpty,
                 review: rt, score: score, norm: meterW,
-                vClass: vClass, vWord: vWord, metaRich: !!(meta.kw.length || meta.reviews.length),
-                why: why, lowConf: lowConf, metricsEstimated: metricsEstimated,
+                vClass: vClass, vWord: vWord, metaRich: metaRich,
                 atmosphere: { metrics: atmosMetrics, targetAudience: targetAudience, notSuitableFor: notSuitableFor }
             };
         });
@@ -983,8 +926,8 @@
         core.removeClass('sw-knock');
         void core[0].offsetWidth;
         core.addClass('sw-knock');
-        setTimeout(function(){ if (core[0] && document.body.contains(core[0])) core.html(diceSVG(f)); }, 190);
-        setTimeout(function(){ core.removeClass('sw-knock'); if (cb) cb(); }, 440);
+        setTimeout(function(){ core.html(diceSVG(f)); }, 300);
+        setTimeout(function(){ core.removeClass('sw-knock'); if (cb) cb(); }, 580);
     }
 
     function buildReadyInner(a) {
@@ -1009,19 +952,16 @@
             '</div>';
 
         var prosConsHtml = '<div class="sw-columns">' +
-            '<div class="sw-col pros"><div class="sw-col-title">Что привлекает</div><ul class="sw-list">' + a.pros.slice(0, 8).map(function(p){ return '<li>' + esc(p) + '</li>'; }).join('') + '</ul></div>' +
-            '<div class="sw-col cons"><div class="sw-col-title">Что учитывать</div><ul class="sw-list">' + a.cons.slice(0, 8).map(function(c){ return '<li>' + esc(c) + '</li>'; }).join('') + '</ul></div>' +
+            '<div class="sw-col pros"><ul class="sw-list">' + a.pros.map(function(p){ return '<li>' + esc(p) + '</li>'; }).join('') + '</ul></div>' +
+            '<div class="sw-col cons"><ul class="sw-list">' + a.cons.map(function(c){ return '<li>' + esc(c) + '</li>'; }).join('') + '</ul></div>' +
             '</div>';
 
         return '<div class="sw-dossier">' +
             '<div class="sw-verdict-word ' + a.vClass + '" id="sw-vword">' + esc(a.vWord) + '</div>' +
-            '<div class="sw-meter" aria-hidden="true"><div class="sw-meter-fill ' + a.vClass + '" data-w="' + a.norm + '"></div></div>' +
-            '<div class="sw-why">' + esc(a.why) + '</div>' +
-            '<div class="sw-scale"><span>не смотреть</span><span>смотреть</span></div></div>' +
+            '<div class="sw-meter"><div class="sw-meter-fill ' + a.vClass + '" data-w="' + a.norm + '"></div></div></div>' +
             '<div class="sw-dicebtn selector sw-focusable" id="sw-dice-btn" tabindex="0">' +
             '<span class="sw-dice" id="sw-dice"><span class="sw-dice-core">' + diceSVG(1) + '</span></span>' +
             '<span class="sw-dice-label" id="sw-dice-label">довериться случаю</span></div>' +
-            '<div class="sw-dice-hint">Случайный выбор 50/50 — не оценка качества фильма.</div>' +
             '<div class="sw-tabs">' +
             '<div class="sw-tab-btn selector sw-focusable active" data-tab="proscons" tabindex="0">плюсы и минусы</div>' +
             '<div class="sw-tab-btn selector sw-focusable" data-tab="atmos" tabindex="0">атмосфера и темп</div>' +
@@ -1030,7 +970,6 @@
             prosConsHtml +
             '</div>' +
             '<div class="sw-tab-pane" id="sw-pane-atmos">' +
-            (a.metricsEstimated ? '<div class="sw-note">Ориентировочная оценка по жанру и описанию, не результат опроса зрителей.</div>' : '') +
             '<div class="sw-metrics-grid">' + metricsHtml + '</div>' +
             audienceHtml +
             '</div>';
@@ -1038,68 +977,88 @@
 
     function bindTabs(html) {
         var tabBtns = html.find('.sw-tab-btn');
-        var current = 'proscons', animatedMetrics = false;
         function activateTab(target, el) {
-            if (target !== 'atmos' && target !== 'proscons') return;
-            if (el) focusRing($(el), false);
-            if (target === current) return;
-            current = target;
-            tabBtns.removeClass('active').attr('aria-selected','false');
-            tabBtns.filter('[data-tab="' + target + '"]').addClass('active').attr('aria-selected','true');
+            tabBtns.removeClass('active');
+            tabBtns.filter('[data-tab="' + target + '"]').addClass('active');
             html.find('.sw-tab-pane').removeClass('active');
             html.find('#sw-pane-' + target).addClass('active');
-            if (target === 'atmos' && !animatedMetrics) {
-                animatedMetrics = true;
+            if (target === 'atmos') {
                 html.find('#sw-pane-atmos .sw-metric-card').each(function(i){
-                    var card = $(this), fill = card.find('.sw-metric-bar-fill');
-                    uiLater(function(){
+                    var card = $(this);
+                    var fill = card.find('.sw-metric-bar-fill');
+                    card.removeClass('appear');
+                    fill.css('width', 0);
+                    setTimeout(function(){
                         card.addClass('appear');
                         fill.css('width', (fill.attr('data-w') || 0) + '%');
-                    }, 45 + i * 45, _sw_session);
+                    }, i * 70);
                 });
             }
+            if (el) focusRing($(el), true);
         }
-        tabBtns.on('hover:enter click', function(){
+        tabBtns.on('hover:enter', function(){
             activateTab($(this).attr('data-tab'), this);
         });
-        tabBtns.on('hover:hover', function(){ focusRing($(this), false); });
-        tabBtns.attr('role','tab').attr('aria-selected','false');
-        tabBtns.filter('.active').attr('aria-selected','true');
+        tabBtns.on('hover:hover', function(){
+            focusRing($(this), false);
+        });
+        tabBtns.on('click', function(){
+            activateTab($(this).attr('data-tab'), this);
+        });
     }
 
     function bindDice(html) {
-        var btn = html.find('#sw-dice-btn'), dice = html.find('#sw-dice');
+        var btn = html.find('#sw-dice-btn');
+        var dice = html.find('#sw-dice');
         var label = html.find('#sw-dice-label');
         if (!btn.length || !dice.length || !label.length) return;
-        var session = _sw_session;
+
         function rollDice() {
-            if (window._sw_rolling || window._sw_closed || session !== _sw_session) return;
+            if (window._sw_rolling) return;
             window._sw_rolling = true;
+
+            html.find('.sw-tab-btn').addClass('sw-disabled');
             btn.addClass('sw-rolling');
-            var yes = Math.random() < 0.5;
-            var lastFace = rndFace(), step = 0;
+
+            var choice = SW_DICE_VERDICTS[Math.floor(Math.random() * SW_DICE_VERDICTS.length)];
+            var isYes = choice === 'СТОИТ';
+            var resClass = isYes ? 'res-yes' : 'res-no';
+            var final = isYes ? 'смотреть' : 'не смотреть';
+
             label.removeClass('res-yes res-no').addClass('hide');
-            function nextFace(){
-                var f = rndFace();
-                if (f === lastFace) f = f % 6 + 1;
-                lastFace = f;
-                return f;
+
+            var lastFace = 1; // текущая грань (изначально 1)
+            function getNextFace() {
+                var face;
+                do {
+                    face = rndFace();
+                } while (face === lastFace);
+                lastFace = face;
+                return face;
             }
-            function animate(){
-                if (session !== _sw_session || window._sw_closed || !document.body.contains(btn[0])) return;
-                if (step >= 3) {
-                    label.text(yes ? 'смотреть' : 'не смотреть').removeClass('hide').addClass(yes ? 'res-yes' : 'res-no');
-                    btn.removeClass('sw-rolling');
-                    window._sw_rolling = false;
-                    return;
-                }
-                step++;
-                knockDice(dice, nextFace(), function(){ uiLater(animate, 55, session); });
+
+            var stepsLeft = 5;
+            function step() {
+                stepsLeft--;
+                var isLast = stepsLeft <= 0;
+                knockDice(dice, getNextFace(), function(){
+                    if (!document.body.contains(btn[0])) { window._sw_rolling = false; return; }
+                    if (isLast) {
+                        label.text(final).removeClass('hide').addClass(resClass);
+                        html.find('.sw-tab-btn').removeClass('sw-disabled');
+                        btn.removeClass('sw-rolling');
+                        window._sw_rolling = false;
+                    } else {
+                        setTimeout(step, 90);
+                    }
+                });
             }
-            animate();
+            step();
         }
+
         btn.on('hover:hover', function(){ focusRing(btn, false); });
-        btn.on('hover:enter click', rollDice);
+        btn.on('hover:enter', rollDice);
+        btn.on('click', rollDice);
     }
 
     function clearLoader() {
@@ -1110,7 +1069,6 @@
     }
 
     function cleanupModal() {
-        clearUiTimers();
         window._sw_rolling = false;
         window._sw_activeInteractive = null;
         clearLoader();
@@ -1127,88 +1085,111 @@
     function doClose() {
         if (window._sw_closed) return;
         window._sw_closed = true;
-        try {
-            if (window.Lampa && Lampa.Modal && typeof Lampa.Modal.close === 'function') Lampa.Modal.close();
-        } catch(e) {}
         cleanupModal();
+        try {
+            if (window.Lampa && Lampa.Modal && typeof Lampa.Modal.close === 'function') {
+                Lampa.Modal.close();
+            }
+        } catch(e) {}
     }
 
     function showModal(rawMovie, triggerBtn) {
-        if (Date.now() - _sw_openingAt < 350) return;
-        _sw_openingAt = Date.now();
-        var session = ++_sw_session;
-        clearUiTimers();
-        clearLoader();
         try {
             var movie = sanitizeMovie(rawMovie);
             window._sw_triggerElement = triggerBtn || null;
+
             try {
-                if (getSetting('reset_cache','0') === '1') {
+                if (getSetting('reset_cache', '0') === '1') {
                     _metaCache = {}; _domCache = null;
-                    if (window.Lampa && Lampa.Storage) Lampa.Storage.set(PLUGIN_ID + '_reset_cache','0');
+                    if (window.Lampa && Lampa.Storage) Lampa.Storage.set(PLUGIN_ID + '_reset_cache', '0');
                 }
             } catch(e) {}
+
             try {
                 if (window.Lampa && Lampa.Controller && Lampa.Controller.enabled()) {
                     window._sw_prevController = Lampa.Controller.enabled().name;
                 }
             } catch(e) { window._sw_prevController = 'full'; }
+
+            var cfg = getSettings();
+            var title = esc(movie.title || movie.name || 'Фильм');
             window._sw_closed = false;
-            window._sw_rolling = false;
-            window._sw_activeInteractive = null;
-            var html = $('<div class="sw-wrap"><div id="sw-body"><div class="sw-loader"><div class="sw-loader-emoji">🎬</div>' +
-                '<div class="sw-loader-text">Собираю сведения о фильме…</div><div class="sw-loader-progress"></div></div></div></div>');
-            html.css('font-size', getSettings().font_scale + 'px');
+
+            var phases = [
+                'Сканирую вселенную кино…',
+                'Анализирую скрытые смыслы…',
+                'Проверяю настроение зрителей…',
+                'Считаю аргументы за и против…',
+                'Выношу окончательный вердикт…'
+            ];
+            var html = $('<div class="sw-wrap"><div id="sw-body"><div class="sw-loader"><div class="sw-loader-emoji">🔍</div><div class="sw-loader-text">' + phases[0] + '</div><div class="sw-loader-progress"></div></div></div></div>');
+            html.css('font-size', cfg.font_scale + 'px');
             window._sw_currentModalHtml = html;
-            if (!window.Lampa || !Lampa.Modal || typeof Lampa.Modal.open !== 'function') {
-                window._sw_closed = true; return;
+            window._sw_activeInteractive = null;
+
+            var pi = 0;
+            window._sw_loaderTimer = setInterval(function(){
+                pi = (pi + 1) % phases.length;
+                var t = html.find('.sw-loader-text');
+                if (t.length) t.text(phases[pi]);
+            }, 650);
+
+            if (window.Lampa && Lampa.Modal && typeof Lampa.Modal.open === 'function') {
+                Lampa.Modal.open({
+                    title: 'Стоит ли смотреть: ' + title,
+                    html: html,
+                    size: 'large',
+                    onBack: function(){
+                        if (window._sw_closed) return;
+                        window._sw_closed = true;
+                        cleanupModal();
+                    }
+                });
             }
-            Lampa.Modal.open({
-                title: 'Стоит ли смотреть: ' + esc(movie.title || movie.name || 'Фильм'),
-                html: html, size: 'large',
-                onBack: function(){
-                    if (session !== _sw_session || window._sw_closed) return;
-                    window._sw_closed = true;
-                    cleanupModal();
-                }
-            });
-            if (Lampa.Controller) Lampa.Controller.toggle(CONTROLLER_ID);
+
+            if (window.Lampa && Lampa.Controller) {
+                Lampa.Controller.toggle(CONTROLLER_ID);
+            }
+
             analyze(movie).then(function(a){
-                if (session !== _sw_session || window._sw_closed) return;
                 clearLoader();
+                if (window._sw_closed) return;
+
                 html.find('#sw-body').html('<div class="sw-body">' + buildReadyInner(a) + '</div>');
                 bindDice(html);
                 bindTabs(html);
-                uiLater(function(){
+
+                setTimeout(function(){
                     html.find('#sw-vword').addClass('appear');
                     html.find('.sw-meter-fill').each(function(){
                         this.style.width = (this.getAttribute('data-w') || 50) + '%';
                     });
-                    html.find('.sw-list li').addClass('appear');
-                    focusRing(html.find('#sw-dice-btn'), false);
-                }, 45, session);
+                    html.find('.sw-list li').each(function(i){
+                        var li = $(this);
+                        setTimeout(function(){ li.addClass('appear'); }, i * 30);
+                    });
+
+                    var firstFocus = html.find('#sw-dice-btn');
+                    if (firstFocus.length) {
+                        focusRing(firstFocus, false);
+                    }
+                }, 60);
             }).catch(function(err){
-                if (session !== _sw_session || window._sw_closed) return;
                 clearLoader();
                 console.error('[SW] analyze:', err);
-                html.find('#sw-body').html('<div class="sw-error">Не удалось собрать данные. Закройте окно и попробуйте снова.</div>');
+                html.find('#sw-body').html('<div class="sw-body" style="text-align:center;padding:40px 20px;color:#ff5252">⚠️ Ошибка анализа данных</div>');
             });
-        } catch(e) {
-            console.error('[SW] showModal:', e);
-            if (session === _sw_session) {
-                window._sw_closed = true;
-                clearUiTimers();
-            }
-        }
+        } catch(e) { console.error('[SW] showModal:', e); }
     }
 
     function addBtn(el, rawMovie) {
         try {
             if (!el || !el.length || el.find('.sw-custom-button-enhanced').length) return;
             var movie = sanitizeMovie(rawMovie);
-            var btn = $('<div class="full-start__button selector sw-custom-button-enhanced" data-type="should_watch" tabindex="0"><div class="full-start__icon">' + ICON + '</div><span>Стоит ли смотреть</span></div>');
+            var btn = $('<div class="full-start__button selector sw-custom-button-enhanced" data-type="should_watch" tabindex="0"><div class="full-start__icon">' + ICON + '</div><span>Стоит ли</span></div>');
 
-            btn.on('hover:enter click', function(){ showModal(movie, btn); });
+            btn.on('hover:enter', function(){ showModal(movie, btn); });
+            btn.on('click', function(){ showModal(movie, btn); });
 
             var anchor = el.find('.view--torrent,.view--online,.view--trailer').last();
             if (anchor.length) {
@@ -1219,10 +1200,10 @@
                     fb.append(btn);
                 } else {
                     var titleEl = el.find('.full-start__title,.full-card__title');
-                    if (false && titleEl.length) {
+                    if (titleEl.length) {
                         titleEl.after(btn);
                     } else {
-                        return; // Wait for streaming/source actions container.
+                        el.append(btn);
                     }
                 }
             }
@@ -1263,7 +1244,7 @@
             }
         } catch(e) {}
 
-        console.log('[ShouldWatch] v54.0: safer TMDB, calibrated verdicts, responsive TV navigation.');
+        console.log('[ShouldWatch] v53.3 initialized: D-Pad left/right switch controls, up/down pure scroll to the very bottom.');
     }
 
     try {
