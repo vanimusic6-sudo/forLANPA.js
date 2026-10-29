@@ -1,6 +1,6 @@
 /**
  * Lampa Plugin: "Стоит ли смотреть?" (Should Watch?)
- * Version: 53.3 (D-Pad rework: left/right switch controls, up/down = pure content scroll)
+ * Version: 54.0 (intelligent verdicts, safer data, smoother interface)
  * Compliant with Lampa API, Memory-safe, Pure jQuery/DOM, Zero external dependencies.
  */
 (function () {
@@ -61,7 +61,7 @@
         { re: /dystopia|антиутопи/i, text: '🏙 Антиутопия' },
         { re: /coming of age|взрослен/i, text: '🌱 История взросления' },
         { re: /cyberpunk|киберпанк/i, text: '🤖 Киберпанк' },
-        { re: /space|космос|moon|lunar|mars|марс/i, text: '🚀 Космос' },
+        { re: /outer space|space travel|космос|moon mission|lunar|марс/i, text: '🚀 Космос' },
         { re: /biographical|biopic|биограф/i, text: '📖 Биографическая история' }
     ];
 
@@ -104,7 +104,7 @@
             bad_genres: String(getSetting('bad_genres', '') || ''),
             bad_actors: String(getSetting('bad_actors', '') || ''),
             bad_directors: String(getSetting('bad_directors', '') || ''),
-            min_rating: parseFloat(getSetting('min_rating', '6')) || 6,
+            min_rating: isFinite(parseFloat(getSetting('min_rating', '6'))) ? parseFloat(getSetting('min_rating', '6')) : 6,
             font_scale: parseInt(getSetting('font_scale', '20')) || 20
         };
     }
@@ -240,8 +240,8 @@
     function fmtN(n) { return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ' '); }
 
     function sanitizeMovie(movie) {
-        if (!movie || typeof movie !== 'object') return DEMO_DATA;
-        if (!movie.id && !movie.tmdb_id && !movie.title && !movie.name) return DEMO_DATA;
+        if (!movie || typeof movie !== 'object') return { title: 'Неизвестный фильм' };
+        if (!movie.id && !movie.tmdb_id && !movie.title && !movie.name) return { title: 'Неизвестный фильм' };
         return movie;
     }
 
@@ -386,7 +386,7 @@
         for (var i = 0; i < genresRaw.length; i++) {
             var g = genresRaw[i];
             if (g && typeof g === 'object') {
-                if (g.id && ids.indexOf(g.id) >= 0) return true;
+                if (g.id && ids.indexOf(Number(g.id)) >= 0) return true;
                 if (nameRe.test((g.name || '').toLowerCase())) return true;
             } else if (typeof g === 'string') {
                 if (nameRe.test(g.toLowerCase())) return true;
@@ -424,16 +424,29 @@
     }
 
     function tmdbGet(path, lang) {
-        return new Promise(function(res){
+        return new Promise(function(resolve) {
+            var complete = false;
+            var timer = setTimeout(function(){ finish(null); }, 7000);
+            function finish(data) {
+                if (complete) return;
+                complete = true;
+                clearTimeout(timer);
+                resolve(data && !data.status_code ? data : null);
+            }
             try {
                 var langCode = lang || curLangCode();
-                var url = 'https://api.themoviedb.org/3' + path + (path.indexOf('?') > -1 ? '&' : '?') + 'language=' + langCode + '&api_key=' + tmdbKey();
+                var url = 'https://api.themoviedb.org/3' + path +
+                    (path.indexOf('?') > -1 ? '&' : '?') +
+                    'language=' + encodeURIComponent(langCode) +
+                    '&api_key=' + encodeURIComponent(tmdbKey());
                 if (window.Lampa && Lampa.Request && typeof Lampa.Request.get === 'function') {
-                    Lampa.Request.get(url, function(d){ res(d && d.status_code ? null : d); }, function(){ res(null); }, { dataType: 'json' });
-                } else if (typeof fetch !== 'undefined') {
-                    fetch(url).then(function(r){ return r.json(); }).then(function(d){ res(d && d.status_code ? null : d); }).catch(function(){ res(null); });
-                } else res(null);
-            } catch(e) { res(null); }
+                    Lampa.Request.get(url, finish, function(){ finish(null); }, { dataType: 'json' });
+                } else if (typeof fetch === 'function') {
+                    fetch(url).then(function(response){
+                        return response.ok ? response.json() : null;
+                    }).then(finish).catch(function(){ finish(null); });
+                } else finish(null);
+            } catch(e) { finish(null); }
         });
     }
 
@@ -444,12 +457,12 @@
     function loadMeta(movie) {
         var id = movie.id || movie.tmdb_id;
         if (!id) return Promise.resolve({ kw: [], age: null, reviews: [], hasTrailer: false, enOv: '', popularity: 0 });
-        if (_metaCache[id]) return Promise.resolve(_metaCache[id]);
+        var type = mediaType(movie), cacheKey = type + ':' + id;
+        if (_metaCache[cacheKey]) return Promise.resolve(_metaCache[cacheKey]);
         if (Object.keys(_metaCache).length > 120) _metaCache = {};
-        var type = mediaType(movie);
         return Promise.all([
             tmdbGet('/' + type + '/' + id + '/keywords'),
-            tmdbGet('/' + type + '/' + id + '/content_ratings'),
+            tmdbGet('/' + type + '/' + id + (type === 'tv' ? '/content_ratings' : '/release_dates')),
             tmdbGet('/' + type + '/' + id + '/reviews'),
             tmdbGet('/' + type + '/' + id + '/videos'),
             tmdbGet('/' + type + '/' + id, 'en-US'),
@@ -459,15 +472,26 @@
             if (arr[0]) (arr[0].keywords || arr[0].results || []).forEach(function(k){ if (k && k.name) kw.push(k.name.toLowerCase()); });
             var age = null;
             if (arr[1] && arr[1].results) {
-                var ru = arr[1].results.find(function(x){ return x.iso_3166_1 === 'RU'; });
-                var us = arr[1].results.find(function(x){ return x.iso_3166_1 === 'US'; });
-                if (ru && ru.rating) { var n = parseInt(ru.rating); if (!isNaN(n)) age = n; }
-                if (age === null && us && us.rating) age = mapUSRating(us.rating);
-                if (age === null && arr[1].results.length) {
-                    var f = arr[1].results[0];
-                    if (f.rating) { var n2 = parseInt(f.rating); age = !isNaN(n2) ? n2 : mapUSRating(f.rating); }
+                function cert(region) {
+                    if (!region) return null;
+                    if (type === 'tv') return region.rating || null;
+                    var dates = region.release_dates || [];
+                    for (var j = 0; j < dates.length; j++) {
+                        if (dates[j].certification) return dates[j].certification;
+                    }
+                    return null;
                 }
+                var ru = arr[1].results.filter(function(x){ return x.iso_3166_1 === 'RU'; })[0];
+                var us = arr[1].results.filter(function(x){ return x.iso_3166_1 === 'US'; })[0];
+                var ruValue = cert(ru), usValue = cert(us);
+                if (ruValue) {
+                    var n = parseInt(ruValue, 10);
+                    if (isFinite(n) && n >= 0 && n <= 21) age = n;
+                }
+                if (age === null && usValue) age = mapUSRating(usValue);
+                // Don't reinterpret another country's certificate as a Russian age.
             }
+
             var reviews = [];
             if (arr[2] && arr[2].results) {
                 reviews = arr[2].results.slice(0, 6).map(function(r){
@@ -480,8 +504,8 @@
             }
             var enOv = (arr[4] && arr[4].overview) ? arr[4].overview : '';
             var popularity = (arr[5] && arr[5].popularity) ? arr[5].popularity : 0;
-            var r = { kw: kw, age: age, reviews: reviews, hasTrailer: hasTrailer, enOv: enOv, popularity: popularity };
-            _metaCache[id] = r;
+            var r = { kw: kw, age: age, reviews: reviews, hasTrailer: hasTrailer, enOv: enOv, popularity: popularity, details: arr[5] || null };
+            _metaCache[cacheKey] = r;
             return r;
         });
     }
@@ -502,43 +526,9 @@
     }
 
     function readDomSignals(key) {
-        if (_domCache && _domCache.key === key) return _domCache.data;
-        var out = { mm: {}, moods: [], ok: false, age: null, reviews: [] };
-        try {
-            var txt = (document.body.innerText || '').substring(0, 25000);
-            var amAll = txt.match(/\b(0|6|12|16|18)\+/g);
-            if (amAll) {
-                for (var i = 0; i < amAll.length; i++) {
-                    var v3 = parseInt(amAll[i], 10);
-                    if (!isNaN(v3) && (out.age === null || v3 > out.age)) out.age = v3;
-                }
-            }
-            var mm = {}, found = 0;
-            DOM_METRICS.forEach(function(p){
-                var r = txt.match(p.re);
-                if (r) { mm[p.key] = parseFloat(r[1].replace(',', '.')); found++; }
-            });
-            var moods = [];
-            var mi = txt.indexOf('Настроения');
-            if (mi > -1) {
-                var chunk = txt.substring(mi + 10, mi + 1600);
-                var re = /(\d{1,3})\s*%\s*\n?\s*([А-Яа-яЁёA-Za-z][А-Яа-яЁёA-Za-z….-]{2,24})/g, r2;
-                while ((r2 = re.exec(chunk)) && moods.length < 12) moods.push({ name: r2[2].trim(), pct: parseInt(r2[1]) });
-            }
-            if (found >= 3 || moods.length >= 3) { out.mm = mm; out.moods = moods; out.ok = true; }
-            var ci = txt.indexOf('Комментарии');
-            if (ci > -1) {
-                var lines = txt.substring(ci + 11, ci + 6000).split(/\n+/);
-                for (var i2 = 0; i2 < lines.length && out.reviews.length < 6; i2++) {
-                    var ln = lines[i2].trim();
-                    if (!ln) continue;
-                    if (/^(Сезон|Режиссёр|Актёры|Производство|Теги|Настроения|Подробно)/.test(ln)) break;
-                    if (ln.length >= 40) out.reviews.push({ author: 'зритель', text: ln });
-                }
-            }
-        } catch(e) {}
-        _domCache = { key: key, data: out };
-        return out;
+        // Never scrape body.innerText: it can contain other films, reviews and age labels.
+        // Only reliable per-title API data may influence the recommendation.
+        return { mm: {}, moods: [], ok: false, age: null, reviews: [] };
     }
 
     function lampaLocal(movie) {
@@ -605,13 +595,19 @@
             var blG = parseBL(cfg.bad_genres), blA = parseBL(cfg.bad_actors), blD = parseBL(cfg.bad_directors);
             var now = new Date().getFullYear();
             var q = (movie.quality || movie.source_quality || '').toString().toUpperCase();
-            var rating = parseFloat(movie.vote_average) || 0;
-            var votes = parseInt(movie.vote_count) || 0;
-            var runtime = parseInt(movie.runtime) || 0;
-            var genresRaw = movie.genres || [];
+            var rating = Number(movie.vote_average || 0), votes = Number(movie.vote_count || 0);
+            if (!isFinite(rating) || rating < 0 || rating > 10) rating = 0;
+            if (!isFinite(votes) || votes < 0) votes = 0;
+            if (!votes && meta.details && meta.details.vote_count) {
+                votes = Number(meta.details.vote_count) || 0;
+                rating = Number(meta.details.vote_average) || rating;
+            }
+            var runtime = parseInt(movie.runtime, 10) || 0;
+            var genresRaw = (movie.genres && movie.genres.length ? movie.genres : (meta.details && meta.details.genres) || []);
             var genres = genresRaw.map(function(g){ return typeof g === 'string' ? g : (g && g.name) || ''; }).filter(Boolean);
-            var ovRu = (movie.overview || '').trim(), ovEn = (meta.enOv || '').trim(), ovBoth = [ovRu, ovEn];
-            var yr = movie.release_date ? parseInt(movie.release_date.substring(0, 4)) : 0;
+            var ovRu = (movie.overview || (meta.details && meta.details.overview) || '').trim(), ovEn = (meta.enOv || '').trim(), ovBoth = [ovRu, ovEn];
+            var firstDate = movie.release_date || movie.first_air_date || (meta.details && (meta.details.release_date || meta.details.first_air_date)) || '';
+            var yr = firstDate ? parseInt(String(firstDate).substring(0,4),10) : 0;
             var dom = readDomSignals(movie.id || movie.tmdb_id || 'x');
             var mm = dom.ok ? dom.mm : {}, moods = dom.ok ? dom.moods : [];
             var domRevs = dom.reviews || [];
@@ -629,7 +625,7 @@
             var hasFamilyGenre = genreByIdOrName(genresRaw, [GENRE_ID_FAMILY, GENRE_ID_KIDS], /family|семейн|kids|детск/);
             var kidsKw = hasKw(ctx, /for kids|children|family-friendly|детям|семейн|для детей|preschool|toddler|baby|nursery|cartoon for kids|kids tv|educational|animated series|дошкольн|малыш/i);
 
-            var age = dom.age !== null ? dom.age : meta.age;
+            var age = meta.age;
 
             function dim(kwRe, ovRe) {
                 var k = hasKw(ctx, kwRe);
@@ -703,14 +699,14 @@
             if (votes >= 3000 && adj >= 8.0) add('card','pro','✨ Высокий рейтинг: ' + rating.toFixed(1) + ' (' + fmtN(votes) + ' голосов)', 30, 'ratehi');
             else if (votes >= 500 && adj >= cfg.min_rating) add('card','pro','✨ Хороший рейтинг: ' + rating.toFixed(1) + ' (' + fmtN(votes) + ' голосов)', 20, 'ratehi');
             else if (votes >= 100 && adj >= cfg.min_rating) add('card','pro','✨ Достойный рейтинг: ' + rating.toFixed(1) + ' (' + fmtN(votes) + ' голосов)', 14, 'ratehi');
-            if (votes > 0 && votes < 1500 && adj >= 7.6) add('card','pro','🔍 Скрытая жемчужина', 12);
+            if (votes >= 100 && votes < 1500 && adj >= 7.6) add('card','pro','🔍 Высоко оценённый малоизвестный фильм', 12);
             if (votes >= 2000 && adj >= 7.8 && yr > 0 && yr <= now - 5) add('card','pro','🏛 Культурное признание', 12);
             if (yr === now) add('card','pro','🆕 Новинка ' + yr + ' года', 6, 'fresh');
             if (votes > 0 && votes < 100) add('card','con','❓ Мало оценок (' + votes + ')', 14, 'rateunc');
             if (votes === 0) add('card','con','⚠️ Нет оценок', 16, 'rateunc');
             if (votes >= 100 && adj < cfg.min_rating) add('card','con','📉 Рейтинг ниже порога: ' + rating.toFixed(1), 22, 'ratelow');
             else if (votes >= 50 && rating > 0 && rating < 5) add('card','con','📉 Низкий рейтинг: ' + rating.toFixed(1), 26, 'ratelow');
-            if (runtime > 0 && runtime <= 95) add('card','pro','⏱ Короткометражка: ' + runtime + ' мин', 7, 'runtime');
+            if (runtime > 0 && runtime <= 95 && mediaType(movie) === 'movie') add('card','pro','⏱ Небольшой хронометраж: ' + runtime + ' мин', 7, 'runtime');
             else if (runtime > 150) add('card','con','⌛ Долгий хронометраж: ' + runtime + ' мин', 12, 'runtime');
             if (/CAM|TS|HDCAM|HDRIP|TELECINE|SCR|WORKPRINT|TELESYNC/i.test(q)) add('card','con','📺 Экранная копия / низкое качество', 26, 'quality');
             else if (/4K|UHD|2160p/i.test(q)) add('card','pro','🎥 Доступно в 4K UHD', 10, 'quality');
@@ -762,49 +758,49 @@
             });
             if (hasGenre(genres, /comedy|комедия/i) && (mm.sadness || 0) <= 3) add('moods','pro','😂 Комедийный жанр', 10, 'fun');
 
-            if (rt.total >= 2 && rt.tone === 'pos') add('reviews','pro','💬 ' + who + ' в восторге', 20, 'rev');
-            else if (rt.total >= 2 && rt.tone === 'neg') add('reviews','con','💬 ' + who + ' раскритиковали', 22, 'rev');
-            else if (rt.total >= 2 && rt.tone === 'mix') add('reviews','pro','💬 Мнения разделились', 10, 'rev');
+            if (rt.total >= 4 && rt.pos >= 3 && rt.tone === 'pos') add('reviews','pro','💬 ' + who + ' в восторге', 20, 'rev');
+            else if (rt.total >= 4 && rt.neg >= 3 && rt.tone === 'neg') add('reviews','con','💬 ' + who + ' раскритиковали', 22, 'rev');
+            else if (rt.total >= 4 && rt.pos >= 2 && rt.neg >= 2 && rt.tone === 'mix') add('reviews','pro','💬 Мнения разделились', 10, 'rev');
 
             if (local.inFavorite && local.favList === 'viewed') add('lampa','con','👁 Уже просмотрено вами', 8, 'lampa');
             else if (local.inFavorite) add('lampa','pro','🔖 Сохранено в закладках', 8, 'lampa');
             if (local.viewedPercent >= 90) add('lampa','con','👁 Досмотрено до конца (' + local.viewedPercent + '%)', 8, 'lampa');
             else if (local.viewedPercent >= 10) add('lampa','con','⏸ Приостановлено на ' + local.viewedPercent + '%', 12, 'lampa');
 
-            var CAPS = { card: 55, user: 50, tmdb: 45, moods: 40, reviews: 28, lampa: 18, sparkle: 60 };
-            var per = {};
-            var sumPro = 0, sumCon = 0;
-            F.forEach(function(f){
-                var s = per[f.src] || (per[f.src] = { pro: 0, con: 0 });
-                s[f.kind] += f.w;
-                if (f.kind === 'pro') sumPro += f.w; else sumCon += f.w;
-            });
-            var score = 0;
-            Object.keys(per).forEach(function(k){
-                var cap = CAPS[k] || 40;
-                score += Math.min(per[k].pro, cap) - Math.min(per[k].con, cap);
-            });
-            var metaRich = !!(meta.kw.length || meta.reviews.length);
-            var activeSrc = 1 + (metaRich ? 1 : 0) + (rt.total >= 2 ? 1 : 0) + (dom.ok || moods.length ? 1 : 0) + (local.inFavorite || local.viewedPercent > 0 ? 1 : 0);
-            var lowConf = activeSrc <= 2;
-            if (lowConf) score = Math.round(score * 0.6);
-            if (score > 100) score = 100; if (score < -100) score = -100;
-
-            var meterW = (sumPro + sumCon) > 0 ? Math.round(100 * sumPro / (sumPro + sumCon)) : 50;
-            if (meterW < 5) meterW = 5; if (meterW > 95) meterW = 95;
-
+            // Objective clues (4K, trailers, runtime, keywords, bookmarks)
+            // may enrich the explanation but must not dictate whether to watch.
+            var ratingConf = votes ? Math.min(1, Math.log(1 + votes) / Math.log(1501)) : 0;
+            var baseScore = votes ? (adj - cfg.min_rating) * 30 * ratingConf : 0;
+            var reviewScore = rt.total >= 4 && Math.abs(rt.pos - rt.neg) >= 3
+                ? Math.max(-9, Math.min(9, (rt.pos - rt.neg) * 2)) : 0;
+            var prefsPenalty = (mG.length ? 42 : 0) + (mA.length ? 26 : 0) + (mD.length ? 28 : 0);
+            var score = Math.max(-100, Math.min(100, Math.round(baseScore + reviewScore - prefsPenalty)));
+            var lowConf = votes < 40;
+            var confidence = votes >= 1500 ? 'высокая' : votes >= 150 ? 'средняя' : 'низкая';
+            var meterW = Math.max(7, Math.min(93, Math.round(50 + score * 0.43)));
             var vClass, vWord;
-            if (score > 15) { vClass = 'yes'; vWord = 'СТОИТ'; }
-            else if (score < -15) { vClass = 'no'; vWord = 'НЕ СТОИТ'; }
-            else { vClass = 'meh'; vWord = 'СПОРНО'; }
+            if (lowConf && !prefsPenalty) {
+                vClass = 'meh'; vWord = 'МАЛО ДАННЫХ';
+            } else if (score > 16) {
+                vClass = 'yes'; vWord = 'СТОИТ';
+            } else if (score < -16) {
+                vClass = 'no'; vWord = 'НЕ СТОИТ';
+            } else {
+                vClass = 'meh'; vWord = 'СПОРНО';
+            }
+            var why = votes
+                ? 'TMDB: ' + rating.toFixed(1) + '/10 · ' + fmtN(votes) + ' оценок · уверенность: ' + confidence
+                : 'Недостаточно оценок для надёжного вывода';
+            if (prefsPenalty) why += ' · учтены ваши исключения';
+
 
             var sortF = function(a,b){ return b.w - a.w; };
             var pros = F.filter(function(f){ return f.kind === 'pro'; }).sort(sortF).map(function(f){ return f.text; });
             var cons = F.filter(function(f){ return f.kind === 'con'; }).sort(sortF).map(function(f){ return f.text; });
             var prosEmpty = !pros.length;
             var consEmpty = !cons.length;
-            if (prosEmpty) pros.push('ℹ️ Нет данных для анализа');
-            if (consEmpty) cons.push((blG.length || blA.length || blD.length) ? '✅ Фильтры и ограничения чисты' : '✅ Минусов нет');
+            if (prosEmpty) pros.push('ℹ️ Мало подтверждённых преимуществ');
+            if (consEmpty) cons.push('ℹ️ Подтверждённых недостатков не найдено');
 
             // === Улучшенное определение темпа (mPace) ===
             var paceHeuristic = 5.5;
@@ -824,17 +820,18 @@
             if (mm.action > 6) {
                 paceHeuristic = Math.max(paceHeuristic, 8.5);
             }
-            var mPace = mm.pace > 0 ? Math.max(mm.pace, paceHeuristic) : paceHeuristic;
+            var mPace = mm.pace > 0 ? mm.pace : paceHeuristic;
 
             // Остальные метрики...
             var dramaHeuristic = (hasGenre(genres, /драма|drama|биография|biography|исторический|historical/i) ? 8.2 : (rating >= 8 ? 7.0 : 5.0));
-            var mDrama = mm.sadness > 0 ? Math.max(mm.sadness, dramaHeuristic) : dramaHeuristic;
+            var mDrama = mm.sadness > 0 ? mm.sadness : dramaHeuristic;
 
             var mFear = mm.fear > 0 ? mm.fear : (hasGenre(genres, /ужасы|хоррор/i) ? 8.8 : (hasGenre(genres, /триллер/i) ? 7.2 : 2.5));
 
             var immersionHeuristic = (hasGenre(genres, /фантастика|sci-fi|фэнтези|fantasy|приключения|adventure/i) ? 8.5 : (rating >= 7.5 ? 7.5 : 5.5));
-            var mImmersion = rating >= 7.8 ? 8.9 : (rating >= 6.8 ? Math.max(7.2, immersionHeuristic) : immersionHeuristic);
+            var mImmersion = immersionHeuristic;
 
+            var metricsEstimated = !dom.ok;
             var atmosMetrics = [
                 { key: 'pace', name: 'Темп', score: Math.min(10, Math.max(1, +(mPace).toFixed(1))) },
                 { key: 'fear', name: 'Напряжение', score: Math.min(10, Math.max(1, +(mFear).toFixed(1))) },
@@ -895,7 +892,8 @@
             return {
                 movie: movie, pros: pros, cons: cons, prosEmpty: prosEmpty, consEmpty: consEmpty,
                 review: rt, score: score, norm: meterW,
-                vClass: vClass, vWord: vWord, metaRich: metaRich,
+                vClass: vClass, vWord: vWord, metaRich: !!(meta.kw.length || meta.reviews.length),
+                why: why, lowConf: lowConf, metricsEstimated: metricsEstimated,
                 atmosphere: { metrics: atmosMetrics, targetAudience: targetAudience, notSuitableFor: notSuitableFor }
             };
         });
