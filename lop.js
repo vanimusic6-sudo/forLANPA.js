@@ -688,7 +688,7 @@
             }
 
             var dViol = dim(/violenc|violent|gore|murder|blood|tortur|brutal|weapon|massacre|execution|stab|slaughter|gunfight|shootout|hitman|serial killer|battle/, /убийств|насил|жесток|кровь|крови|кровью|кровав|кровопролит|стрельб|перестрел|взрыв|оружи|резн|террор|бойн/);
-            var dDrugs = dim(/drug|meth lab|methamphetamine|crystal meth|cocaine|heroin|marijuan|cannabis|narcotic|addiction|overdose|dealer|cartel|crack|lsd|ecstasy|opium/, /метамфетам|амфетам|наркот|кокаин|героин|марихуан|лсд|экстази|опиум|дилер|картел|зависимост|зелье|травк|варит/);
+            var dDrugs = dim(/drug|meth lab|methamphetamine|crystal meth|cocaine|heroin|marijuan|cannabis|narcotic|addiction|overdose|dealer|cartel|crack|lsd|ecstasy|opium/, /метамфетам|амфетам|наркот|кокаин|героин|марихуан|лсд|экстази|опиум|дилер|картел|зависимост/);
             var dNud = dim(/nudity|topless|strip club|stripper|full frontal|rear nudity/, /обнаж|нагот|голы|стриптиз/);
             var dSex = dim(/sex scene|sexual content|orgy|prostitut|erotic|one night stand|hooker|threesome|explicit/, /эротик|откровенн|проститут|интим|секс|постельн|презерватив/);
             var dSmoke = dim(/smoking|cigarette|cigar/, /курени|сигарет|табак/);
@@ -774,19 +774,19 @@
             else if (familyOK) add('tmdb','pro','👨‍👩‍👧 Семейный фильм' + (age !== null ? ' (' + age + '+)' : ''), 16, 'family');
             if (age !== null && age >= 18) add('tmdb','con','🔞 Возрастное ограничение 18+', 14, 'age');
             else if (age !== null && age >= 16) add('tmdb','con','🔞 Возрастное ограничение 16+', 12, 'age');
-            if (isAnim && !familyOK) add('tmdb','con','🎭 Взрослая анимация' + (age !== null ? ' (' + age + '+)' : ''), 14, 'adultanim');
+            if (isAnim && !familyOK && (age !== null && age >= 16 || hardAdult)) add('tmdb','con','🎭 Взрослая анимация' + (age !== null ? ' (' + age + '+)' : ''), 14, 'adultanim');
 
-            if (cViol >= 50) add('tmdb','con','🔪 Сцены насилия и жестокости', 16, 'violence');
+            if (cViol >= 50) add('tmdb','con','⚠️ Возможное насилие/жестокость', 16, 'violence');
             if (cDrugs >= 30) add('tmdb','con','💉 Упоминание веществ/наркотиков', 14, 'drugs');
-            if (cSex >= 30) add('tmdb','con','🫣 Откровенные сцены', 12, 'sex');
+            if (cSex >= 30) add('tmdb','con','⚠️ Темы сексуального характера', 12, 'sex');
             if (cProf >= 40) add('tmdb','con','🤬 Ненормативная лексика', 10, 'lang');
-            if (cFear >= 40) add('moods','con','😱 Слишком страшно / хоррор', 14, 'scare');
+            if (cFear >= 40) add('moods','con','😱 Хоррор / страшные темы', 14, 'scare');
             else if ((mm.fear||0) >= 3.5) add('moods','pro','😬 Напряжённый сюжет', 9, 'tension');
             if (cSuic >= 40) add('tmdb','con','⚠️ Тяжёлые темы / суицид', 16, 'suic');
             if (cAlc >= 40) add('tmdb','con','🍺 Сцены алкоголя/опьянения', 6, 'alc');
             if (cSmoke >= 40) add('tmdb','con','🚬 Сцены курения', 5, 'smoke');
             if (cGamb >= 40) add('tmdb','con','🎰 Азартные игры', 10, 'gamb');
-            if (cCrime >= 50) add('tmdb','con','⚖️ Криминальный фокус', 8, 'crime');
+            if (cCrime >= 50) add('tmdb','pro','🕵️ Криминальный сюжет', 8, 'crime');
             if (dPsych.k || dPsych.o) add('tmdb','con','🧠 Психологическое давление', 8, 'psych');
             if (dIll.k || dIll.o) add('tmdb','con','🏥 Тема неизлечимой болезни', 6, 'ill');
             if (dWar.k || dWar.o) add('tmdb','con','🎖 Военные действия', 8, 'war');
@@ -829,6 +829,10 @@
                 ? Math.max(-9, Math.min(9, (rt.pos - rt.neg) * 2)) : 0;
             var prefsPenalty = (mG.length ? 42 : 0) + (mA.length ? 26 : 0) + (mD.length ? 28 : 0);
             var score = Math.max(-100, Math.min(100, Math.round(baseScore + reviewScore - prefsPenalty)));
+            // Explicitly disliked genres/authors/performers matter more than
+            // an average public rating, even for critically acclaimed titles.
+            if (mG.length) score = Math.min(score, -36);
+            else if (mA.length || mD.length) score = Math.min(score, -24);
             var lowConf = votes < 40;
             var confidence = votes >= 1500 ? 'высокая' : votes >= 150 ? 'средняя' : 'низкая';
             var meterW = Math.max(7, Math.min(93, Math.round(50 + score * 0.43)));
@@ -858,7 +862,7 @@
 
             // === Улучшенное определение темпа (mPace) ===
             var paceHeuristic = 5.5;
-            var hasFastGenres = hasGenre(genres, /action|боевик|приключен|adventure|триллер|thriller|криминал|crime|военный|war|шпионский|spy|спорт|sport|sports|вестерн|western|музыка|musical|music/i);
+            var hasFastGenres = hasGenre(genres, /action|боевик|приключен|adventure|триллер|thriller|шпионский|spy|спорт|sport|sports/i);
             if (hasFastGenres) {
                 paceHeuristic = 8.5;
             } else if (hasGenre(genres, /комедия|comedy|семейн|family|анимация|animation|мульт/i)) {
