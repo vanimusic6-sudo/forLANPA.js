@@ -270,7 +270,7 @@
     function hasGenre(g, re) { return g.some(function(x){ return re.test((x || '').toLowerCase()); }); }
     function inText(s, re) { return re.test((s || '').toLowerCase()); }
     function inAnyText(texts, re) { return texts.some(function(s){ return inText(s, re); }); }
-    function mediaType(m) { return (m && m.name && !m.title) ? 'tv' : 'movie'; }
+    function mediaType(m) { return (m && (m.media_type === 'tv' || m.first_air_date || m.number_of_seasons || (m.name && !m.title))) ? 'tv' : 'movie'; }
     function uniq(arr) { return arr.filter(function(v,i,s){ return s.indexOf(v) === i; }); }
     function fmtN(n) { return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ' '); }
 
@@ -497,58 +497,70 @@
 
     function loadMeta(movie) {
         var id = movie.id || movie.tmdb_id;
-        if (!id) return Promise.resolve({ kw: [], age: null, reviews: [], hasTrailer: false, enOv: '', popularity: 0 });
+        var empty = { kw: [], age: null, reviews: [], hasTrailer: false,
+            enOv: '', popularity: 0, details: null };
+        if (!id) return Promise.resolve(empty);
         var type = mediaType(movie), cacheKey = type + ':' + id;
         if (_metaCache[cacheKey]) return Promise.resolve(_metaCache[cacheKey]);
         if (Object.keys(_metaCache).length > 120) _metaCache = {};
-        return Promise.all([
-            tmdbGet('/' + type + '/' + id + '/keywords'),
-            tmdbGet('/' + type + '/' + id + (type === 'tv' ? '/content_ratings' : '/release_dates')),
-            tmdbGet('/' + type + '/' + id + '/reviews'),
-            tmdbGet('/' + type + '/' + id + '/videos'),
-            tmdbGet('/' + type + '/' + id, 'en-US'),
-            tmdbGet('/' + type + '/' + id)
-        ]).then(function(arr){
-            var kw = [];
-            if (arr[0]) (arr[0].keywords || arr[0].results || []).forEach(function(k){ if (k && k.name) kw.push(k.name.toLowerCase()); });
-            var age = null;
-            if (arr[1] && arr[1].results) {
+        // TMDB append_to_response makes 2 HTTP requests instead of 6.
+        // EN data supplies reviews and trailers which are frequently absent in RU.
+        var ratingPart = type === 'tv' ? 'content_ratings' : 'release_dates';
+        var pending = Promise.all([
+            tmdbGet('/' + type + '/' + id +
+                '?append_to_response=keywords,credits,' + ratingPart),
+            tmdbGet('/' + type + '/' + id +
+                '?append_to_response=reviews,videos', 'en-US')
+        ]).then(function(arr) {
+            var main = arr[0] || {}, en = arr[1] || {};
+            var keys = main.keywords || en.keywords || {};
+            var kw = (keys.keywords || keys.results || []).map(function(x){
+                return x && x.name ? x.name.toLowerCase() : '';
+            }).filter(Boolean);
+            var age = null, certificates = main[ratingPart];
+            if (certificates && certificates.results) {
                 function cert(region) {
                     if (!region) return null;
                     if (type === 'tv') return region.rating || null;
                     var dates = region.release_dates || [];
-                    for (var j = 0; j < dates.length; j++) {
-                        if (dates[j].certification) return dates[j].certification;
+                    for (var k = 0; k < dates.length; k++) {
+                        if (dates[k].certification) return dates[k].certification;
                     }
                     return null;
                 }
-                var ru = arr[1].results.filter(function(x){ return x.iso_3166_1 === 'RU'; })[0];
-                var us = arr[1].results.filter(function(x){ return x.iso_3166_1 === 'US'; })[0];
-                var ruValue = cert(ru), usValue = cert(us);
-                if (ruValue) {
-                    var n = parseInt(ruValue, 10);
+                var ru = certificates.results.filter(function(x){ return x.iso_3166_1 === 'RU'; })[0];
+                var us = certificates.results.filter(function(x){ return x.iso_3166_1 === 'US'; })[0];
+                var ruCert = cert(ru), usCert = cert(us);
+                if (ruCert) {
+                    var n = parseInt(ruCert, 10);
                     if (isFinite(n) && n >= 0 && n <= 21) age = n;
                 }
-                if (age === null && usValue) age = mapUSRating(usValue);
-                // Don't reinterpret another country's certificate as a Russian age.
+                if (age === null && usCert) age = mapUSRating(usCert);
             }
-
-            var reviews = [];
-            if (arr[2] && arr[2].results) {
-                reviews = arr[2].results.slice(0, 6).map(function(r){
-                    return { author: r.author || 'Аноним', text: (r.content || '').replace(/<[^>]+>/g, '').trim() };
-                }).filter(function(r){ return r.text.length > 20; });
-            }
-            var hasTrailer = false;
-            if (arr[3] && arr[3].results) {
-                hasTrailer = arr[3].results.some(function(v){ return v.type === 'Trailer' && v.site === 'YouTube' });
-            }
-            var enOv = (arr[4] && arr[4].overview) ? arr[4].overview : '';
-            var popularity = (arr[5] && arr[5].popularity) ? arr[5].popularity : 0;
-            var r = { kw: kw, age: age, reviews: reviews, hasTrailer: hasTrailer, enOv: enOv, popularity: popularity, details: arr[5] || null };
-            _metaCache[cacheKey] = r;
+            var reviewItems = (en.reviews && en.reviews.results) ||
+                (main.reviews && main.reviews.results) || [];
+            var reviews = reviewItems.slice(0, 6).map(function(r){
+                return { author: r.author || 'Аноним',
+                    text: (r.content || '').replace(/<[^>]+>/g,'').trim() };
+            }).filter(function(r){ return r.text.length > 20; });
+            var videos = (en.videos && en.videos.results) ||
+                (main.videos && main.videos.results) || [];
+            var r = { kw: kw, age: age, reviews: reviews,
+                hasTrailer: videos.some(function(v){
+                    return v.type === 'Trailer' && v.site === 'YouTube';
+                }),
+                enOv: en.overview || '', popularity: main.popularity || en.popularity || 0,
+                details: arr[0] || arr[1] || null };
+            // Transient network errors shouldn't poison subsequent attempts.
+            if (arr[0] || arr[1]) _metaCache[cacheKey] = r;
+            else delete _metaCache[cacheKey];
             return r;
+        }).catch(function(){
+            delete _metaCache[cacheKey];
+            return empty;
         });
+        _metaCache[cacheKey] = pending;
+        return pending;
     }
 
     function hasKw(ctx, re) { return ctx.kw.some(function(k){ return re.test(k); }); }
@@ -630,8 +642,9 @@
 
     function analyze(rawMovie) {
         var movie = sanitizeMovie(rawMovie);
-        return Promise.all([loadCredits(movie), loadMeta(movie), Promise.resolve(lampaLocal(movie))]).then(function(arr){
-            var credits = arr[0], meta = arr[1], local = arr[2];
+        return Promise.all([loadMeta(movie), Promise.resolve(lampaLocal(movie))]).then(function(arr){
+            var meta = arr[0], local = arr[1];
+            var credits = movie.credits || (meta.details && meta.details.credits) || null;
             var cfg = getSettings();
             var blG = parseBL(cfg.bad_genres), blA = parseBL(cfg.bad_actors), blD = parseBL(cfg.bad_directors);
             var now = new Date().getFullYear();
