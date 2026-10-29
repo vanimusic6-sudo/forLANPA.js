@@ -396,6 +396,7 @@
             left: function () { moveFocus(-1); },
             right: function () { moveFocus(1); },
             enter: function () { triggerActiveAction(); },
+            ok: function () { triggerActiveAction(); }, // Lampa TV builds may dispatch ok, not enter
             back: function () { doClose(); }
         });
     }
